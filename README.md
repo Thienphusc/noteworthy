@@ -272,7 +272,7 @@ Built with:
 
 ## Contact
 
-Created by [Sihoo Lee](https://github.com/sihooleebd)
+Created by [Sihoo Lee](https://github.com/sihooleebd) & Hojun Lee
 
 ---
 
