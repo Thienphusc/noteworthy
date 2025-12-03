@@ -245,9 +245,18 @@ Edit `config.typ`:
 
 ## Documentation
 
-For complete reference and advanced usage:
-- [DOCUMENTATION.md](DOCUMENTATION.md) - Complete framework reference
-- [content/](content/) - Working examples for every feature
+Complete documentation is available in the [Wiki](../../wiki):
+
+- [Getting Started](../../wiki/Getting-Started) - Installation and quick start
+- [Configuration](../../wiki/Configuration) - Configure your document
+- [Content Blocks](../../wiki/Content-Blocks) - Available content blocks
+- [Plotting Reference](../../wiki/Plotting-Reference) - Complete plotting API
+- [Themes](../../wiki/Themes) - Theme customization
+- [Build System](../../wiki/Build-System) - Build script usage
+- [Advanced Usage](../../wiki/Advanced-Usage) - Extending the framework
+- [Troubleshooting](../../wiki/Troubleshooting) - Common issues
+
+The [content/](content/) directory contains working examples for every feature.
 
 ## Contributing
 
