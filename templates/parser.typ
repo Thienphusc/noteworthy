@@ -1,5 +1,4 @@
-#import "setup.typ": * //edit this file to configure
-#import "./templater.typ": *
+#import "templater.typ": * //edit config/config.json to configure
 
 #let target = sys.inputs.at("target", default: none)
 #let page-offset = sys.inputs.at("page-offset", default: none)

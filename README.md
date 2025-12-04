@@ -34,7 +34,7 @@ An example project is available at https://github.com/sihooleebd/math-noteworthy
 - **Content Block Library**: Pre-styled components for definitions, theorems, examples, proofs, and solutions
 - **Plotting Engine**: Advanced 2D/3D plotting, vector diagrams, and geometric constructions
 - **Document Structure**: Automated table of contents, chapter covers, and page headers
-- **Configuration Layer**: Centralized `config.typ` for complete control
+- **Configuration Layer**: JSON-based `config/config.json` for complete control
 - **Build System**: Incremental compilation with automatic PDF merging
 
 ## Key Features
@@ -70,11 +70,25 @@ cd noteworthy
 
 ### Build Your Document
 
-```bash
-# Standard build (generates output.pdf)
-python3 build.py
+The build system features an interactive TUI (Text User Interface):
 
-# Keep individual chapter PDFs as archive
+```bash
+# Launch interactive build menu
+python3 build.py
+```
+
+**TUI Features:**
+- **Chapter Selection**: Toggle individual chapters/sections to compile
+- **Options**:
+  - `d` - Debug mode (verbose output)
+  - `f` - Include/exclude frontmatter (cover, preface, outline)
+  - `l` - Keep individual PDFs after merge
+  - `c` - Configure custom Typst flags (e.g., `--font-path`)
+- **Controls**: Arrow keys to navigate, Space to toggle, Enter to build, `q` to quit
+- **Build Progress**: Real-time compilation status with Typst log toggle (`v`)
+
+```bash
+# CLI options (bypass TUI)
 python3 build.py --leave-individual
 ```
 
@@ -94,7 +108,10 @@ This repository includes comprehensive examples of all framework features:
 
 ```
 noteworthy/
-├── config.typ              # Framework configuration
+├── config/                 # Configuration files
+│   ├── config.json         # Main settings (title, theme, hierarchy, etc.)
+│   ├── preface.typ         # Preface content
+│   └── snippets.typ        # Custom macros and shortcuts
 ├── build.py                # Build system
 ├── content/                # Example content
 │   ├── chapter 01/         # Core Components
@@ -112,6 +129,7 @@ noteworthy/
 └── templates/              # Framework core
     ├── parser.typ          # Document orchestration
     ├── templater.typ       # Component exports
+    ├── setup.typ           # Configuration loader
     ├── default-schemes.typ # Theme definitions
     ├── covers/             # Cover page generators
     ├── layouts/            # Content blocks & outline
