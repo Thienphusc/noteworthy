@@ -25,7 +25,7 @@
 #let box-inset = eval(config.box-inset)
 #let render-sample-count = config.render-sample-count
 #let display-mode = config.display-mode
-#let hierarchy = config.hierarchy
+#let hierarchy = json("../config/hierarchy.json")
 
 // Load schemes
 #import "./default-schemes.typ": *

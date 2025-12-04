@@ -2,6 +2,7 @@
 build/
 output.pdf
 *.zip
+.build_settings.json
 
 # Typst cache
 .typst-cache/
