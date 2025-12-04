@@ -32,9 +32,15 @@
 ### Prerequisites
 
 - **Typst** (v0.12.0+): [Install Typst](https://github.com/typst/typst#installation)
-- **PDF Merge Tool** (optional, for multi-chapter documents):
-  - macOS: `brew install poppler` (provides `pdfunite`)
+- **Python 3** with **tqdm**: `pip3 install tqdm` (for progress bars during build)
+- **Poppler** (provides `pdfinfo` for page counting):
+  - macOS: `brew install poppler`
   - Linux: `apt-get install poppler-utils`
+- **PDF Tool** (for merging and metadata):
+  - **Option 1** (recommended): `brew install pdftk-java` (macOS) or `apt-get install pdftk` (Linux)
+  - **Option 2** (fallback): Ghostscript is usually pre-installed on macOS/Linux
+  
+> **Note**: `pdftk-java` is required for adding PDF metadata (title, author) and clickable bookmarks/outline that appear in the PDF viewer sidebar for easy navigation.
 
 ### Installation
 
@@ -101,8 +107,12 @@ The `build.py` script provides powerful incremental compilation:
 
 ### Features
 
+- **Two-Pass Compilation**: First pass compiles all sections and tracks page numbers; second pass regenerates TOC with accurate page numbers
 - **Incremental Compilation**: Compiles cover, preface, TOC, and each chapter/section separately
+- **Progress Bars**: Real-time visual feedback with `tqdm` showing compilation progress, speed, and ETA
 - **Automatic Merging**: Uses `pdfunite` or `ghostscript` to merge individual PDFs
+- **PDF Metadata**: Adds document title, author, and clickable bookmarks/outline using `pdftk`
+- **Interactive TOC**: Sidebar bookmarks allow easy navigation in PDF readers
 - **Auto Cleanup**: Removes temporary build files after successful compilation
 - **Archive Option**: Optionally preserve individual PDFs as a zip file
 
@@ -117,20 +127,29 @@ python3 build.py
 # Preserve individual PDFs
 python3 build.py --leave-individual
 # Output: output.pdf + build_pdfs.zip (15 individual PDFs)
-```
+``
 
 ### Build Process
 
+**Pass 1: Initial Compilation**
 1. Extracts document structure from `config.typ`
-2. Compiles components in order:
+2. Compiles components in order, tracking page numbers:
    - Cover page
    - Preface
-   - Table of contents
+   - Table of contents (placeholder)
    - For each chapter:
      - Chapter cover
      - Chapter sections (01.01, 01.02, etc.)
-3. Merges all PDFs using `pdfunite` (or `ghostscript` as fallback)
-4. Cleans up build directory (unless `--leave-individual` specified)
+3. Generates `page_map.json` with starting pages
+
+**Pass 2: Regeneration**
+1. Regenerates table of contents with accurate page numbers
+2. Recompiles chapters with correct page offsets
+
+**Finalization**
+1. Merges all PDFs using `pdfunite` (or `ghostscript` as fallback)
+2. Adds PDF metadata (title, author) and bookmarks using `pdftk`
+3. Cleans up build directory (unless `--leave-individual` specified)
 
 ## Usage Example
 
