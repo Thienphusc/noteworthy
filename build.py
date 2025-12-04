@@ -1198,7 +1198,7 @@ def main():
     try:
         import shutil as sh
         term_size = sh.get_terminal_size()
-        min_lines, min_cols = 25, 60
+        min_lines, min_cols = 15, 50
         if term_size.lines < min_lines or term_size.columns < min_cols:
             print(f"Error: Terminal too small!")
             print(f"Current size: {term_size.lines} lines × {term_size.columns} columns")
