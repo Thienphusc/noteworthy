@@ -22,7 +22,7 @@
 [![Typst](https://img.shields.io/badge/Typst-0.12%2B-239DAD?logo=typst)](https://typst.app/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> **RECOMMENDATION** |
+> **RECOMMENDATION |**
 > We recommend using `template` branch for using it unless you need demo contents.
 > Look at `Quick Start` section for additional information.
 
@@ -67,7 +67,7 @@ An example project is available at https://github.com/sihooleebd/math-noteworthy
   - Windows: Download from [pdftk releases](https://www.pdflabs.com/tools/pdftk-the-pdf-toolkit/)
   - *Fallback*: Ghostscript (usually pre-installed on macOS/Linux, [download for Windows](https://ghostscript.com/releases/gsdnld.html))
   
-> **Note**: `pdftk` is required for adding PDF metadata (title, author) and clickable bookmarks/outline that appear in the PDF viewer sidebar for easy navigation.
+> **Note |** `pdftk` is required for adding PDF metadata (title, author) and clickable bookmarks/outline that appear in the PDF viewer sidebar for easy navigation.
 
 ### Installation
 
