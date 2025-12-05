@@ -1,0 +1,37 @@
+name: Sync Template Branch
+on:
+  push:
+    branches:
+      - main  # Triggers when you push to main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Fetch all history so we can access other branches
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync Main to Template (excluding content)
+        run: |
+          # Switch to the template branch (create it if it doesn't exist)
+          git checkout template 2>/dev/null || git checkout -b template
+          
+          # Grab everything from main, BUT exclude the 'content' folder
+          # The ':!content' syntax tells git "everything except this path"
+          git checkout main -- . ':!content'
+          git checkout main -- . ':!templates/config/'
+          
+          # Check if there are changes to commit
+          if [[ -n $(git status -s) ]]; then
+            git commit -m "Sync from main"
+            git push origin template
+          else
+            echo "No changes to sync."
+          fi
