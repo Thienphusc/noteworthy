@@ -76,7 +76,7 @@ git clone https://github.com/sihooleebd/noteworthy.git
 cd noteworthy
 ```
 
-If you want only the templates without demo contents,
+If you want only the templates without demo contents (Recommended),
 ```bash
 git clone -b template https://github.com/sihooleebd/noteworthy.git
 cd noteworthy
