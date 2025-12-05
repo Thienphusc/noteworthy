@@ -1,6 +1,6 @@
 #import "@preview/cetz:0.4.2"
 #import "@preview/cetz-plot:0.1.3": plot
-#import "../setup.typ": render-sample-count
+#import "../setup.typ": render-implicit-count, render-sample-count
 
 /// Plots a mathematical function in various coordinate systems.
 /// Supports standard functions, parametric equations, polar curves, and implicit equations.
@@ -26,7 +26,7 @@
   type: "y=x",
   domain: auto,
   y-domain: (-5, 5),
-  samples: render-sample-count,
+  samples: auto, // Use auto to select appropriate default based on type
   label: none,
   style: (:),
 ) = {
@@ -35,21 +35,30 @@
   } else {
     black
   }
-
+  
   let base-color = if "stroke" in style { style.stroke } else { highlight-col }
   let final-style = (stroke: base-color) + style
-
+  
+  // Select appropriate sample count based on plot type
+  let actual-samples = if samples != auto {
+    samples
+  } else if type == "implicit" {
+    render-implicit-count
+  } else {
+    render-sample-count
+  }
+  
   let common-args = (
-    samples: samples,
+    samples: actual-samples,
     style: final-style,
   )
-
+  
   if label != none {
     // Wrap label in theme's text color
     let colored-label = text(fill: theme.plot.stroke, label)
     common-args.insert("label", colored-label)
   }
-
+  
   if type == "y=x" {
     // Standard Function: y = f(x)
     let x-dom = if domain == auto { (-5, 5) } else { domain }
@@ -77,18 +86,18 @@
   } else if type == "implicit" {
     // Implicit Equation: f(x, y) = 0
     let x-dom = if domain == auto { (-5, 5) } else { domain }
-
+    
     plot.add-contour(
       x-domain: x-dom,
       y-domain: y-domain,
-      x-samples: samples,
-      y-samples: samples,
+      x-samples: actual-samples,
+      y-samples: actual-samples,
       z: 0,
       fill: false,
       style: final-style,
       func,
     )
-
+    
     if label != none {
       plot.annotate({
         import cetz.draw: *
