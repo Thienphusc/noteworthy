@@ -864,7 +864,11 @@ def show_editor_menu(scr):
         scr.clear()
         
         layout = "vert"
-        if h < len(LOGO) + 10 and w > 80: layout = "horz"
+        # Use horizontal layout only if vertical space is tight but we have width
+        # Vertical needs: Logo(15) + Title(2) + Menu(8) + Footer(1) + Spacing(4) ~= 30 lines
+        min_vert_height = len(LOGO) + len(options) + 8
+        if h < min_vert_height and w > 80: 
+            layout = "horz"
         
         if layout == "horz":
             # Horizontal: Logo left, Menu right
@@ -894,19 +898,24 @@ def show_editor_menu(scr):
                 
         else:
             # Vertical (Standard)
+            lh = len(LOGO)
             title_h = 2
             list_h = len(options) + 2
-            total_h = title_h + list_h + 2
+            total_h = lh + title_h + list_h + 2
             start_y = max(1, (h - total_h) // 2)
             
-            TUI.safe_addstr(scr, start_y, (w - 14) // 2, "SELECT EDITOR", curses.color_pair(1) | curses.A_BOLD)
+            lgx = (w - 14) // 2
+            for i, line in enumerate(LOGO):
+                TUI.safe_addstr(scr, start_y + i, lgx, line, curses.color_pair(1) | curses.A_BOLD)
+            
+            TUI.safe_addstr(scr, start_y + lh + 1, (w - 14) // 2, "SELECT EDITOR", curses.color_pair(1) | curses.A_BOLD)
             
             bw = min(55, w - 4)
             bx = (w - bw) // 2
-            TUI.draw_box(scr, start_y + 2, bx, list_h, bw, "Editors")
+            TUI.draw_box(scr, start_y + lh + 3, bx, list_h, bw, "Editors")
             
             for i, (key, name, desc) in enumerate(options):
-                y = start_y + 3 + i
+                y = start_y + lh + 4 + i
                 if i == cursor:
                     TUI.safe_addstr(scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
                 TUI.safe_addstr(scr, y, bx + 4, f"{key}. {name}", curses.color_pair(4) | (curses.A_BOLD if i == cursor else 0))
