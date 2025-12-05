@@ -68,7 +68,13 @@ An example project is available at https://github.com/sihooleebd/math-noteworthy
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/noteworthy.git
+git clone https://github.com/sihooleebd/noteworthy.git
+cd noteworthy
+```
+
+If you want only the templates without demo contents,
+```bash
+git clone -b template https://github.com/sihooleebd/noteworthy.git
 cd noteworthy
 ```
 
