@@ -24,7 +24,11 @@ from pathlib import Path
 BUILD_DIR = Path("templates/build")
 OUTPUT_FILE = Path("output.pdf")
 RENDERER_FILE = "templates/parser.typ"
-SETTINGS_FILE = Path(".build_settings.json")
+
+# System Config Paths
+SYSTEM_CONFIG_DIR = Path("templates/systemconfig")
+SETTINGS_FILE = SYSTEM_CONFIG_DIR / "build_settings.json"
+INDEXIGNORE_FILE = SYSTEM_CONFIG_DIR / ".indexignore"
 
 # Config File Paths
 CONFIG_FILE = Path("templates/config/config.json")
@@ -85,6 +89,7 @@ def extract_hierarchy():
 
 def load_settings():
     try:
+        SYSTEM_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         if SETTINGS_FILE.exists():
             return json.loads(SETTINGS_FILE.read_text())
     except: pass
@@ -92,8 +97,83 @@ def load_settings():
 
 def save_settings(settings):
     try:
+        SYSTEM_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
     except: pass
+
+def load_indexignore():
+    """Load set of ignored file IDs from .indexignore"""
+    try:
+        if INDEXIGNORE_FILE.exists():
+            lines = INDEXIGNORE_FILE.read_text().strip().split('\n')
+            return {l.strip() for l in lines if l.strip() and not l.startswith('#')}
+    except: pass
+    return set()
+
+def save_indexignore(ignored_set):
+    """Save set of ignored file IDs to .indexignore"""
+    try:
+        SYSTEM_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        content = "# Files to ignore during hierarchy sync\n# One file ID per line (e.g., 01.03)\n\n"
+        content += '\n'.join(sorted(ignored_set))
+        INDEXIGNORE_FILE.write_text(content)
+    except: pass
+
+def sync_hierarchy_with_content():
+    """Compare hierarchy.json with actual content files. Returns (missing_files, new_files)."""
+    hierarchy = json.loads(HIERARCHY_FILE.read_text())
+    
+    # Get all page IDs from hierarchy
+    hierarchy_ids = set()
+    for ch in hierarchy:
+        for pg in ch.get("pages", []):
+            hierarchy_ids.add(pg["id"])
+    
+    # Get all content files from disk
+    content_dir = Path("content")
+    disk_ids = set()
+    if content_dir.exists():
+        for chapter_dir in content_dir.iterdir():
+            if chapter_dir.is_dir() and chapter_dir.name.startswith("chapter"):
+                for f in chapter_dir.glob("*.typ"):
+                    disk_ids.add(f.stem)
+    
+    # Find differences
+    missing_files = hierarchy_ids - disk_ids  # In hierarchy but not on disk
+    new_files = disk_ids - hierarchy_ids       # On disk but not in hierarchy
+    
+    return sorted(missing_files), sorted(new_files)
+
+def add_single_file_to_hierarchy(page_id, title=""):
+    """Add a single page to hierarchy.json with given title."""
+    try:
+        hierarchy = json.loads(HIERARCHY_FILE.read_text())
+        ch_num = int(page_id[:2])
+        
+        # Find or create chapter
+        target_ch = None
+        for ch in hierarchy:
+            pages = ch.get("pages", [])
+            if pages and pages[0]["id"].startswith(f"{ch_num:02d}."):
+                target_ch = ch
+                break
+        
+        if not target_ch:
+            # Create new chapter
+            target_ch = {"title": f"Chapter {ch_num}", "summary": "", "pages": []}
+            hierarchy.append(target_ch)
+        
+        # Add page
+        new_page = {"id": page_id, "title": title or "Untitled"}
+        if "pages" not in target_ch:
+            target_ch["pages"] = []
+        target_ch["pages"].append(new_page)
+        target_ch["pages"].sort(key=lambda p: p["id"])
+        
+        HIERARCHY_FILE.write_text(json.dumps(hierarchy, indent=4))
+        return True
+    except:
+        return False
 
 def compile_target(target, output, page_offset=None, page_map=None, extra_flags=None, callback=None, log_callback=None):
     cmd = ["typst", "compile", RENDERER_FILE, str(output), "--root", ".", "--input", f"target={target}"]
@@ -522,7 +602,8 @@ class BuildMenu:
                     cb = "[✓]" if self.ch_selected(ci) else "[~]" if self.ch_partial(ci) else "[ ]"
                     cc = 2 if self.ch_selected(ci) else 3 if self.ch_partial(ci) else 4
                     TUI.safe_addstr(self.scr, y, bx + 4, cb, curses.color_pair(cc))
-                    TUI.safe_addstr(self.scr, y, bx + 7, f" Ch {ch['pages'][0]['id'][:2]}: {ch['title']}"[:bw-12], curses.color_pair(1))
+                    ch_num = ch['pages'][0]['id'][:2] if ch.get('pages') else f"{ci+1:02d}"
+                    TUI.safe_addstr(self.scr, y, bx + 7, f" Ch {ch_num}: {ch['title']}"[:bw-12], curses.color_pair(1))
                 else:
                     p = self.hierarchy[ci]["pages"][ai]
                     sel = self.selected.get((ci, ai), False)
@@ -688,6 +769,7 @@ def show_editor_menu(scr):
         ("3", "Scheme Editor", "Color themes"),
         ("4", "Preface Editor", "Preface content"),
         ("5", "Snippets Editor", "Custom macros"),
+        ("6", "Indexignore Editor", "Ignored files"),
     ]
     
     while True:
@@ -713,7 +795,7 @@ def show_editor_menu(scr):
             TUI.safe_addstr(scr, y, bx + 4, f"{key}. {name}", curses.color_pair(4) | (curses.A_BOLD if i == cursor else 0))
             TUI.safe_addstr(scr, y, bx + 25, desc[:bw-27], curses.color_pair(4) | curses.A_DIM)
         
-        TUI.safe_addstr(scr, h - 1, (w - 32) // 2, "↑↓:Nav  Enter:Select  Esc/q:Back", curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(scr, h - 1, (w - 32) // 2, "Up/Down:Nav  Enter:Select  Esc/q:Back", curses.color_pair(4) | curses.A_DIM)
         scr.refresh()
         
         k = scr.getch()
@@ -721,13 +803,14 @@ def show_editor_menu(scr):
             return
         elif k in (curses.KEY_UP, ord('k')): cursor = max(0, cursor - 1)
         elif k in (curses.KEY_DOWN, ord('j')): cursor = min(len(options) - 1, cursor + 1)
-        elif k in (ord('\n'), curses.KEY_ENTER, 10) or (ord('1') <= k <= ord('5')):
-            idx = k - ord('1') if ord('1') <= k <= ord('5') else cursor
+        elif k in (ord('\n'), curses.KEY_ENTER, 10) or (ord('1') <= k <= ord('6')):
+            idx = k - ord('1') if ord('1') <= k <= ord('6') else cursor
             if idx == 0: ConfigEditor(scr).run()
             elif idx == 1: HierarchyEditor(scr).run()
             elif idx == 2: SchemeEditor(scr).run()
             elif idx == 3: TextEditor(scr, PREFACE_FILE, title="Preface Editor").run()
             elif idx == 4: SnippetsEditor(scr).run()
+            elif idx == 5: IndexignoreEditor(scr).run()
 
 
 class TextEditor(BaseEditor):
@@ -1438,6 +1521,92 @@ class SnippetsEditor(ListEditor):
         return False
 
 
+class IndexignoreEditor(ListEditor):
+    """Simple editor for .indexignore file - list of ignored file IDs."""
+    def __init__(self, scr):
+        super().__init__(scr, "INDEXIGNORE EDITOR")
+        self.ignored = sorted(load_indexignore())
+        self.items = self.ignored if self.ignored else []
+        self.box_title = "Ignored Files"
+        self.box_width = 50
+    
+    def save(self):
+        save_indexignore(set(self.ignored))
+        self.modified = False
+        return True
+    
+    def _draw_item(self, y, x, item, width, selected):
+        if selected:
+            TUI.safe_addstr(self.scr, y, x + 2, ">", curses.color_pair(3) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, y, x + 4, item, curses.color_pair(1) | curses.A_BOLD)
+        else:
+            TUI.safe_addstr(self.scr, y, x + 4, item, curses.color_pair(4))
+    
+    def refresh(self):
+        h, w = self.scr.getmaxyx()
+        self.scr.clear()
+        
+        bw = min(self.box_width, w - 4)
+        bh = min(h - 6, 20)
+        bx = (w - bw) // 2
+        by = (h - bh) // 2
+        
+        TUI.draw_box(self.scr, by, bx, bh, bw, f" {self.title} ")
+        TUI.safe_addstr(self.scr, by + 1, bx + 2, f"Ignored files: {len(self.ignored)}", curses.color_pair(4) | curses.A_DIM)
+        
+        visible = bh - 5
+        if self.cursor < self.scroll: self.scroll = self.cursor
+        elif self.cursor >= self.scroll + visible: self.scroll = self.cursor - visible + 1
+        
+        if not self.ignored:
+            TUI.safe_addstr(self.scr, by + 3, bx + 4, "(no ignored files)", curses.color_pair(4) | curses.A_DIM)
+        else:
+            for i in range(visible):
+                idx = self.scroll + i
+                if idx >= len(self.ignored): break
+                y = by + 3 + i
+                self._draw_item(y, bx, self.ignored[idx], bw, idx == self.cursor)
+        
+        footer = "a:Add  d:Delete  s:Save  q:Quit"
+        if self.modified: footer = "* " + footer
+        TUI.safe_addstr(self.scr, by + bh - 1, bx + (bw - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        self.scr.refresh()
+    
+    def _handle_input(self, k):
+        if k in (curses.KEY_UP, ord('k')) and self.ignored:
+            self.cursor = max(0, self.cursor - 1)
+            return True
+        elif k in (curses.KEY_DOWN, ord('j')) and self.ignored:
+            self.cursor = min(len(self.ignored) - 1, self.cursor + 1)
+            return True
+        elif k == ord('a'):
+            # Add new item
+            curses.echo()
+            curses.curs_set(1)
+            h, w = self.scr.getmaxyx()
+            self.scr.addstr(h - 2, 2, "Enter file ID to ignore: ")
+            self.scr.clrtoeol()
+            self.scr.refresh()
+            try:
+                new_id = self.scr.getstr(h - 2, 27, 20).decode('utf-8').strip()
+                if new_id and new_id not in self.ignored:
+                    self.ignored.append(new_id)
+                    self.ignored.sort()
+                    self.items = self.ignored
+                    self.modified = True
+            except: pass
+            curses.noecho()
+            curses.curs_set(0)
+            return True
+        elif k == ord('d') and self.ignored:
+            del self.ignored[self.cursor]
+            self.items = self.ignored
+            self.cursor = min(self.cursor, len(self.ignored) - 1) if self.ignored else 0
+            self.modified = True
+            return True
+        return False
+
+
 # =============================================================================
 # BUILD UI
 # =============================================================================
@@ -1788,6 +1957,82 @@ def run_app(scr, args):
     
     scr.clear()
     h, w = scr.getmaxyx()
+    TUI.safe_addstr(scr, h // 2, (w - 24) // 2, "Syncing content files...", curses.color_pair(1) | curses.A_BOLD)
+    scr.refresh()
+    
+    # Sync hierarchy with content files
+    missing_files, new_files = sync_hierarchy_with_content()
+    ignored_files = load_indexignore()
+    new_files = [f for f in new_files if f not in ignored_files]
+    
+    # Handle missing files (fatal error)
+    if missing_files:
+        scr.clear()
+        h, w = scr.getmaxyx()
+        
+        bw = min(60, w - 6)
+        bh = min(len(missing_files) + 8, h - 4)
+        bx = (w - bw) // 2
+        by = (h - bh) // 2
+        
+        TUI.draw_box(scr, by, bx, bh, bw, " Missing Files - FATAL ")
+        
+        y = by + 2
+        for i, line in enumerate(SAD_FACE):
+            TUI.safe_addstr(scr, y + i, bx + 4, line, curses.color_pair(6) | curses.A_BOLD)
+        
+        TUI.safe_addstr(scr, by + 2, bx + 18, "Files in hierarchy but not on disk:", curses.color_pair(6))
+        
+        for i, f in enumerate(missing_files[:bh-6]):
+            TUI.safe_addstr(scr, by + 4 + i, bx + 18, f"  - {f}.typ", curses.color_pair(4))
+        
+        TUI.safe_addstr(scr, by + bh - 2, bx + 2, "Create these files or remove from hierarchy.json", curses.color_pair(4) | curses.A_DIM)
+        scr.refresh()
+        scr.getch()
+        return  # Fatal - don't continue
+    
+    # Handle new files (interactive per-file popup)
+    for page_id in new_files:
+        scr.clear()
+        h, w = scr.getmaxyx()
+        
+        bw = min(55, w - 6)
+        bh = 11
+        bx = (w - bw) // 2
+        by = (h - bh) // 2
+        
+        TUI.draw_box(scr, by, bx, bh, bw, " New File Found ")
+        
+        TUI.safe_addstr(scr, by + 2, bx + 2, "A file was found that is not in hierarchy.", curses.color_pair(4))
+        TUI.safe_addstr(scr, by + 4, bx + 2, f"File: {page_id}.typ", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(scr, by + 5, bx + 2, f"Path: content/chapter {page_id[:2]}/", curses.color_pair(4) | curses.A_DIM)
+        
+        TUI.safe_addstr(scr, by + 7, bx + 2, "What would you like to do?", curses.color_pair(4))
+        TUI.safe_addstr(scr, by + bh - 2, bx + 2, "'a' add  |  'i' ignore  |  's' skip", curses.color_pair(4) | curses.A_DIM)
+        
+        scr.refresh()
+        k = scr.getch()
+        
+        if k == ord('a'):
+            # Get title from user
+            curses.echo()
+            curses.curs_set(1)
+            TUI.safe_addstr(scr, by + 9, bx + 2, "Title: ", curses.color_pair(3))
+            scr.refresh()
+            try:
+                title = scr.getstr(by + 9, bx + 9, bw - 12).decode('utf-8').strip()
+            except:
+                title = ""
+            curses.noecho()
+            curses.curs_set(0)
+            add_single_file_to_hierarchy(page_id, title or "Untitled")
+        elif k == ord('i'):
+            ignored_files.add(page_id)
+            save_indexignore(ignored_files)
+        # 's' or any other key = skip (do nothing)
+    
+    # Continue with normal flow
+    scr.clear()
     TUI.safe_addstr(scr, h // 2, (w - 11) // 2, "Indexing...", curses.color_pair(1) | curses.A_BOLD)
     scr.refresh()
     
