@@ -15,6 +15,7 @@ import tty
 import argparse
 import zipfile
 import urllib.request
+import urllib.parse
 import tempfile
 from pathlib import Path
 
@@ -44,8 +45,8 @@ SCHEMES_FILE = BASE_DIR / "templates/config/schemes.json"
 SETUP_FILE = BASE_DIR / "templates/setup.typ"
 
 # Terminal Size Requirements
-MIN_TERM_HEIGHT = 20
-MIN_TERM_WIDTH = 50
+MIN_TERM_HEIGHT = 22 # Increased for margins
+MIN_TERM_WIDTH = 52
 
 # ASCII Art
 LOGO = [
@@ -340,25 +341,31 @@ class TUI:
     def safe_addstr(scr, y, x, text, attr=0):
         try:
             h, w = scr.getmaxyx()
-            if 0 <= y < h and 0 <= x < w:
-                scr.addstr(y, x, text[:w - x - 1], attr)
+            # MARGIN = 1, coordinates are 0-based relative to usable area
+            real_y = y + 1
+            real_x = x + 1
+            if 0 <= real_y < h - 1 and 0 <= real_x < w - 1:
+                scr.addstr(real_y, real_x, text[:w - 1 - real_x], attr)
         except curses.error: pass
 
     @staticmethod
     def draw_box(scr, y, x, h, w, title=""):
         try:
-            scr.addstr(y, x, "╔" + "═" * (w - 2) + "╗")
+            # Adjust coordinates for margin
+            real_y, real_x = y + 1, x + 1
+            scr.addstr(real_y, real_x, "╔" + "═" * (w - 2) + "╗")
             for i in range(1, h - 1):
-                scr.addstr(y + i, x, "║" + " " * (w - 2) + "║")
-            scr.addstr(y + h - 1, x, "╚" + "═" * (w - 2) + "╝")
+                scr.addstr(real_y + i, real_x, "║" + " " * (w - 2) + "║")
+            scr.addstr(real_y + h - 1, real_x, "╚" + "═" * (w - 2) + "╝")
             if title:
-                scr.addstr(y, x + 2, f" {title} ", curses.color_pair(1) | curses.A_BOLD)
+                scr.addstr(real_y, real_x + 2, f" {title} ", curses.color_pair(1) | curses.A_BOLD)
         except curses.error: pass
 
     @staticmethod
     def prompt_save(scr):
         """Show save confirmation prompt, returns 'y', 'n', or 'c'"""
-        h, w = scr.getmaxyx()
+        h_raw, w_raw = scr.getmaxyx()
+        h, w = h_raw - 2, w_raw - 2
         TUI.safe_addstr(scr, h - 1, 2, "Save? (y/n/c): ", curses.color_pair(3) | curses.A_BOLD)
         scr.refresh()
         c = scr.getch()
@@ -367,16 +374,25 @@ class TUI:
     @staticmethod
     def show_saved(scr):
         """Show 'Saved!' message briefly"""
-        h, w = scr.getmaxyx()
+        h_raw, w_raw = scr.getmaxyx()
+        h, w = h_raw - 2, w_raw - 2
         TUI.safe_addstr(scr, h - 1, 2, "Saved!", curses.color_pair(2) | curses.A_BOLD)
         scr.refresh()
         curses.napms(500)
 
     @staticmethod
     def check_terminal_size(scr):
+        was_error = False
         while True:
             h, w = scr.getmaxyx()
-            if h >= MIN_TERM_HEIGHT and w >= MIN_TERM_WIDTH: return True
+            if h >= MIN_TERM_HEIGHT and w >= MIN_TERM_WIDTH:
+                if was_error:
+                    scr.clear()
+                    scr.refresh()
+                    scr.timeout(-1)
+                return True
+            
+            was_error = True
             scr.clear()
             y = h // 2 - 1
             TUI.safe_addstr(scr, y, max(0, (w - 19) // 2), "Terminal too small!", curses.color_pair(6) | curses.A_BOLD)
@@ -385,7 +401,6 @@ class TUI:
             scr.refresh()
             scr.timeout(100)
             if scr.getch() in (ord('q'), 27): return False
-        scr.timeout(-1)
 
 # =============================================================================
 # BASE EDITORS
@@ -405,6 +420,7 @@ class BaseEditor:
     def run(self):
         self.refresh()
         while True:
+            if not TUI.check_terminal_size(self.scr): return
             k = self.scr.getch()
             if k in (ord('q'), 27): # q or Esc
                 if self.modified:
@@ -531,7 +547,8 @@ def show_error_screen(scr, error):
     copied = False
     while True:
         scr.clear()
-        h, w = scr.getmaxyx()
+        h_raw, w_raw = scr.getmaxyx()
+        h, w = h_raw - 2, w_raw - 2
         
         if view_log:
             header = "ERROR LOG (press 'v' to go back, 'c' to copy)"
@@ -566,7 +583,8 @@ def show_success_screen(scr, page_count, has_warnings=False, typst_logs=None):
     copied = False
     while True:
         scr.clear()
-        h, w = scr.getmaxyx()
+        h_raw, w_raw = scr.getmaxyx()
+        h, w = h_raw - 2, w_raw - 2
         
         if view_log and typst_logs:
             header = "TYPST LOG (press 'v' to go back, 'c' to copy)"
@@ -843,27 +861,58 @@ def show_editor_menu(scr):
     ]
     
     while True:
-        h, w = scr.getmaxyx()
+        h_raw, w_raw = scr.getmaxyx()
+        h, w = h_raw - 2, w_raw - 2
         scr.clear()
         
-        # Calculate layout - vertically centered
-        title_h = 2
-        list_h = len(options) + 2
-        total_h = title_h + list_h + 2
-        start_y = max(1, (h - total_h) // 2)
+        layout = "vert"
+        if h < len(LOGO) + 10 and w > 80: layout = "horz"
         
-        TUI.safe_addstr(scr, start_y, (w - 14) // 2, "SELECT EDITOR", curses.color_pair(1) | curses.A_BOLD)
-        
-        bw = min(55, w - 4)
-        bx = (w - bw) // 2
-        TUI.draw_box(scr, start_y + 2, bx, list_h, bw, "Editors")
-        
-        for i, (key, name, desc) in enumerate(options):
-            y = start_y + 3 + i
-            if i == cursor:
-                TUI.safe_addstr(scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
-            TUI.safe_addstr(scr, y, bx + 4, f"{key}. {name}", curses.color_pair(4) | (curses.A_BOLD if i == cursor else 0))
-            TUI.safe_addstr(scr, y, bx + 25, desc[:bw-27], curses.color_pair(4) | curses.A_DIM)
+        if layout == "horz":
+            # Horizontal: Logo left, Menu right
+            lh = len(LOGO)
+            ly = max(0, (h - lh) // 2)
+            lx = max(0, (w - 16 - 60) // 2)
+            
+            for i, line in enumerate(LOGO):
+                if ly + i < h:
+                    TUI.safe_addstr(scr, ly + i, lx, line, curses.color_pair(1) | curses.A_BOLD)
+            
+            # Menu
+            mx = lx + 20 + 4
+            mw = 55
+            list_h = len(options) + 2
+            my = max(0, (h - list_h) // 2)
+            
+            TUI.safe_addstr(scr, my - 2, mx + (mw - 14) // 2, "SELECT EDITOR", curses.color_pair(1) | curses.A_BOLD)
+            TUI.draw_box(scr, my, mx, list_h, mw, "Editors")
+            
+            for i, (key, name, desc) in enumerate(options):
+                y = my + 1 + i
+                if i == cursor:
+                    TUI.safe_addstr(scr, y, mx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
+                TUI.safe_addstr(scr, y, mx + 4, f"{key}. {name}", curses.color_pair(4) | (curses.A_BOLD if i == cursor else 0))
+                TUI.safe_addstr(scr, y, mx + 26, desc[:mw-28], curses.color_pair(4) | curses.A_DIM)
+                
+        else:
+            # Vertical (Standard)
+            title_h = 2
+            list_h = len(options) + 2
+            total_h = title_h + list_h + 2
+            start_y = max(1, (h - total_h) // 2)
+            
+            TUI.safe_addstr(scr, start_y, (w - 14) // 2, "SELECT EDITOR", curses.color_pair(1) | curses.A_BOLD)
+            
+            bw = min(55, w - 4)
+            bx = (w - bw) // 2
+            TUI.draw_box(scr, start_y + 2, bx, list_h, bw, "Editors")
+            
+            for i, (key, name, desc) in enumerate(options):
+                y = start_y + 3 + i
+                if i == cursor:
+                    TUI.safe_addstr(scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
+                TUI.safe_addstr(scr, y, bx + 4, f"{key}. {name}", curses.color_pair(4) | (curses.A_BOLD if i == cursor else 0))
+                TUI.safe_addstr(scr, y, bx + 26, desc[:bw-28], curses.color_pair(4) | curses.A_DIM)
         
         TUI.safe_addstr(scr, h - 1, (w - 32) // 2, "Up/Down:Nav  Enter:Select  Esc/q:Back", curses.color_pair(4) | curses.A_DIM)
         scr.refresh()
@@ -1913,6 +1962,14 @@ class InitWizard:
     """First-time setup wizard for config.json"""
     def __init__(self, scr):
         self.scr = scr
+        
+        themes = ["rose-pine", "dark", "light", "nord", "dracula", "gruvbox"] # Fallback
+        if SCHEMES_FILE.exists():
+             try:
+                 schemes = json.loads(SCHEMES_FILE.read_text())
+                 if schemes: themes = list(schemes.keys())
+             except: pass
+
         self.config = {
             "title": "",
             "subtitle": "",
@@ -1939,7 +1996,7 @@ class InitWizard:
             ("subtitle", "Subtitle", "Enter a subtitle (optional, press Enter to skip):", "str"),
             ("authors", "Authors", "Enter author names (comma-separated):", "list"),
             ("affiliation", "Affiliation", "Enter your organization/affiliation:", "str"),
-            ("display-mode", "Color Theme", "Use ←/→ to select, Enter to confirm:", "choice", ["rose-pine", "dark", "light", "nord", "dracula", "gruvbox"]),
+            ("display-mode", "Color Theme", "Use ←/→ to select, Enter to confirm:", "choice", themes),
             ("font", "Body Font", "Enter body font name:", "str"),
             ("title-font", "Title Font", "Enter title font name:", "str"),
             ("chapter-name", "Chapter Label", "What to call chapters (e.g., 'Chapter', 'Unit'):", "str"),
@@ -1950,45 +2007,92 @@ class InitWizard:
         TUI.init_colors()
     
     def refresh(self):
-        h, w = self.scr.getmaxyx()
+        h_raw, w_raw = self.scr.getmaxyx()
+        h, w = h_raw - 2, w_raw - 2
         self.scr.clear()
         
-        total_h = 16
-        start_y = max(1, (h - total_h) // 2)
+        layout = "vert"
+        if w > 100: layout = "horz"
         
-        TUI.safe_addstr(self.scr, start_y, (w - 22) // 2, "NOTEWORTHY SETUP WIZARD", curses.color_pair(1) | curses.A_BOLD)
-        TUI.safe_addstr(self.scr, start_y + 1, (w - 40) // 2, "Let's set up your document configuration", curses.color_pair(4) | curses.A_DIM)
-        
-        prog = f"Step {self.current_step + 1} of {len(self.steps)}"
-        TUI.safe_addstr(self.scr, start_y + 3, (w - len(prog)) // 2, prog, curses.color_pair(5))
-        
-        step = self.steps[self.current_step]
-        key, label, prompt, stype = step[0], step[1], step[2], step[3]
-        
-        bw = min(60, w - 4)
-        bx = (w - bw) // 2
-        TUI.draw_box(self.scr, start_y + 5, bx, 7, bw, label)
-        
-        TUI.safe_addstr(self.scr, start_y + 6, bx + 2, prompt[:bw-4], curses.color_pair(4))
-        
-        if stype == "choice":
-            # Show slider selector
-            choices = step[4]
-            choice_text = f"◀  {choices[self.choice_index]}  ▶"
-            TUI.safe_addstr(self.scr, start_y + 8, (w - len(choice_text)) // 2, choice_text, curses.color_pair(5) | curses.A_BOLD)
-            # Show dots for position
-            dots = "".join("●" if i == self.choice_index else "○" for i in range(len(choices)))
-            TUI.safe_addstr(self.scr, start_y + 9, (w - len(dots)) // 2, dots, curses.color_pair(4) | curses.A_DIM)
-            footer = "←→:Select  Enter:Confirm  Backspace:Back  Esc:Cancel"
+        if layout == "horz":
+            lh = len(LOGO)
+            ly = max(0, (h - lh) // 2)
+            lx = max(0, (w - 16 - 60) // 2)
+            
+            for i, line in enumerate(LOGO):
+                if ly + i < h:
+                    TUI.safe_addstr(self.scr, ly + i, lx, line, curses.color_pair(1) | curses.A_BOLD)
+            
+            sy = ly + lh + 2
+            for i, step in enumerate(self.steps):
+                if sy + i >= h - 1: break
+                marker = ">" if i == self.current_step else " "
+                style = curses.color_pair(3) | curses.A_BOLD if i == self.current_step else curses.color_pair(4)
+                TUI.safe_addstr(self.scr, sy + i, lx + 2, f"{marker} {step[1]}", style)
+
+            dx = lx + 20 + 4
+            dw = 55
+            dy = max(0, (h - 16) // 2)
+            
+            TUI.draw_box(self.scr, dy, dx, 16, dw, "Setup Wizard")
+            
+            step = self.steps[self.current_step]
+            key, label, prompt, stype = step[0], step[1], step[2], step[3]
+            
+            TUI.safe_addstr(self.scr, dy + 2, dx + 2, f"Step {self.current_step + 1}/{len(self.steps)}: {label}", curses.color_pair(1) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, dy + 4, dx + 2, prompt[:dw-4], curses.color_pair(4))
+            
+            if stype == "choice":
+                choices = step[4]
+                choice_text = f"◀  {choices[self.choice_index]}  ▶"
+                TUI.safe_addstr(self.scr, dy + 7, dx + (dw - len(choice_text)) // 2, choice_text, curses.color_pair(5) | curses.A_BOLD)
+                dots = "".join("●" if i == self.choice_index else "○" for i in range(len(choices)))
+                TUI.safe_addstr(self.scr, dy + 8, dx + (dw - len(dots)) // 2, dots, curses.color_pair(4) | curses.A_DIM)
+            else:
+                curr_val = self.config.get(key, "")
+                if isinstance(curr_val, list): curr_val = ", ".join(curr_val)
+                if curr_val:
+                     TUI.safe_addstr(self.scr, dy + 7, dx + 2, f"Default: {str(curr_val)[:dw-12]}", curses.color_pair(4) | curses.A_DIM)
+            
+            footer = "Enter:Next  Back:Prev  Esc:Cancel"
+            TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+
         else:
-            curr_val = self.config.get(key, "")
-            if isinstance(curr_val, list):
-                curr_val = ", ".join(curr_val)
-            if curr_val:
-                TUI.safe_addstr(self.scr, start_y + 8, bx + 2, f"Default: {str(curr_val)[:bw-12]}", curses.color_pair(4) | curses.A_DIM)
-            footer = "Enter:Input  Backspace:Back  Esc:Cancel"
-        
-        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+            total_h = 16
+            start_y = max(1, (h - total_h) // 2)
+            
+            TUI.safe_addstr(self.scr, start_y, (w - 22) // 2, "NOTEWORTHY SETUP WIZARD", curses.color_pair(1) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, start_y + 1, (w - 40) // 2, "Let's set up your document configuration", curses.color_pair(4) | curses.A_DIM)
+            
+            prog = f"Step {self.current_step + 1} of {len(self.steps)}"
+            TUI.safe_addstr(self.scr, start_y + 3, (w - len(prog)) // 2, prog, curses.color_pair(5))
+            
+            step = self.steps[self.current_step]
+            key, label, prompt, stype = step[0], step[1], step[2], step[3]
+            
+            bw = min(60, w - 4)
+            bx = (w - bw) // 2
+            TUI.draw_box(self.scr, start_y + 5, bx, 7, bw, label)
+            
+            TUI.safe_addstr(self.scr, start_y + 6, bx + 2, prompt[:bw-4], curses.color_pair(4))
+            
+            if stype == "choice":
+                choices = step[4]
+                choice_text = f"◀  {choices[self.choice_index]}  ▶"
+                TUI.safe_addstr(self.scr, start_y + 8, (w - len(choice_text)) // 2, choice_text, curses.color_pair(5) | curses.A_BOLD)
+                dots = "".join("●" if i == self.choice_index else "○" for i in range(len(choices)))
+                TUI.safe_addstr(self.scr, start_y + 9, (w - len(dots)) // 2, dots, curses.color_pair(4) | curses.A_DIM)
+                footer = "←→:Select  Enter:Confirm  Backspace:Back  Esc:Cancel"
+            else:
+                curr_val = self.config.get(key, "")
+                if isinstance(curr_val, list):
+                    curr_val = ", ".join(curr_val)
+                if curr_val:
+                    TUI.safe_addstr(self.scr, start_y + 8, bx + 2, f"Default: {str(curr_val)[:bw-12]}", curses.color_pair(4) | curses.A_DIM)
+                footer = "Enter:Input  Backspace:Back  Esc:Cancel"
+            
+            TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+            
         self.scr.refresh()
     
     def get_input(self):
@@ -2014,6 +2118,7 @@ class InitWizard:
     
     def run(self):
         while self.current_step < len(self.steps):
+            if not TUI.check_terminal_size(self.scr): return None
             self.refresh()
             k = self.scr.getch()
             
@@ -2148,6 +2253,7 @@ class SchemesWizard:
         self.scr.refresh()
         
         while True:
+            if not TUI.check_terminal_size(self.scr): return None
             k = self.scr.getch()
             if k == 27: return None
             elif k in (ord('\n'), 10, curses.KEY_ENTER):
@@ -2229,6 +2335,7 @@ class SyncWizard:
 
     def run(self):
         while True:
+            if not TUI.check_terminal_size(self.scr): return None
             self.refresh()
             k = self.scr.getch()
             
@@ -2306,60 +2413,131 @@ def restore_templates(scr):
     }
     
     try:
-        # Check if we need to restore anything
-        # We do a quick check of some core files first to avoid network hit if obviously healthy?
-        # But "For all templates file" implies we should be thorough.
-        # Let's just try to download if we detect MISSING files in a later step?
-        # Or just always check? Always checking adds startup time.
-        # Let's check for missing core directories or files first.
+        # Fetch file list from GitHub API (lightweight JSON)
+        api_url = "https://api.github.com/repos/sihooleebd/noteworthy/git/trees/master?recursive=1"
+        req = urllib.request.Request(api_url, headers={'User-Agent': 'Noteworthy-Builder'})
         
-        # Actually, let's do the download only if we confirm something is missing.
-        # But we don't know what "something" is without the list.
-        # So we'll just proceed with download-and-check.
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            
+        if 'tree' not in data: return
+
+        # Identify missing files
+        missing_files = []
+        for item in data['tree']:
+            if item['type'] == 'blob' and item['path'].startswith('templates/'):
+                path_str = item['path']
+                if path_str in EXCLUDE_FILES: continue
+                
+                local_path = Path(path_str)
+                if not local_path.exists():
+                    missing_files.append(path_str)
         
+        if not missing_files: return
+
+        # Download only missing files
+        scr.clear()
         h, w = scr.getmaxyx()
-        TUI.safe_addstr(scr, h // 2 + 2, (w - 40) // 2, "Checking template integrity...", curses.color_pair(4))
+        msg = f"Restoring {len(missing_files)} missing templates..."
+        TUI.safe_addstr(scr, h // 2 + 2, (w - len(msg)) // 2, msg, curses.color_pair(4))
         scr.refresh()
         
-        url = "https://github.com/sihooleebd/noteworthy/archive/refs/heads/master.zip"
+        base_raw_url = "https://raw.githubusercontent.com/sihooleebd/noteworthy/master/"
         
-        with tempfile.TemporaryFile() as tmp:
-            # Download
-            with urllib.request.urlopen(url, timeout=5) as response:
-                shutil.copyfileobj(response, tmp)
+        for fpath in missing_files:
+            local_path = Path(fpath)
+            local_path.parent.mkdir(parents=True, exist_ok=True)
             
-            tmp.seek(0)
-            with zipfile.ZipFile(tmp) as z:
-                restored_count = 0
-                for member in z.namelist():
-                    # Look for files inside templates/
-                    # Structure is likely noteworthy-master/templates/...
-                    parts = member.split('/')
-                    if len(parts) > 2 and parts[1] == "templates" and not member.endswith('/'):
-                        # Reconstruct local path: templates/...
-                        rel_path = "/".join(parts[1:])
-                        local_path = Path(rel_path)
-                        
-                        if str(local_path) in EXCLUDE_FILES:
-                            continue
+            # Download individual file
+            safe_path = urllib.parse.quote(fpath)
+            file_url = f"{base_raw_url}{safe_path}"
+            
+            with urllib.request.urlopen(file_url, timeout=10) as response, open(local_path, 'wb') as out_file:
+                shutil.copyfileobj(response, out_file)
                             
-                        if not local_path.exists():
-                            # Restore
-                            local_path.parent.mkdir(parents=True, exist_ok=True)
-                            with z.open(member) as source, open(local_path, "wb") as target:
-                                shutil.copyfileobj(source, target)
-                            restored_count += 1
-                            
-                if restored_count > 0:
-                    TUI.safe_addstr(scr, h // 2 + 3, (w - 40) // 2, f"Restored {restored_count} missing template files", curses.color_pair(2))
-                    scr.refresh()
-                    curses.napms(1000)
+        msg = "Restoration complete!"
+        TUI.safe_addstr(scr, h // 2 + 3, (w - len(msg)) // 2, msg, curses.color_pair(2))
+        scr.refresh()
+        curses.napms(1000)
                     
-    except Exception as e:
-        # Fail silently or show warning?
-        # User requested "automatically", implying it shouldn't block if it fails (e.g. no internet)
-        # But if critical files are missing and we fail, we're in trouble.
+    except Exception:
         pass
+
+class MainMenu:
+    def __init__(self, scr):
+        self.scr = scr
+        self.options = [
+            ("e", "Editor", "Edit configuration and content"),
+            ("b", "Builder", "Build PDF document")
+        ]
+        self.selected = 1 # Default to Builder
+
+    def run(self):
+        while True:
+            if not TUI.check_terminal_size(self.scr): return None
+            h_raw, w_raw = self.scr.getmaxyx()
+            h, w = h_raw - 2, w_raw - 2
+            self.scr.clear()
+            
+            lh = len(LOGO)
+            layout = "vert" 
+            if h < lh + 10 and w > 80: layout = "horz"
+            
+            if layout == "vert":
+                # Vertical Layout (Centered)
+                start_y = max(1, (h - lh - 10) // 2)
+                lgx = (w - 14) // 2
+                
+                for i, line in enumerate(LOGO):
+                    TUI.safe_addstr(self.scr, start_y + i, lgx, line, curses.color_pair(1) | curses.A_BOLD)
+                TUI.safe_addstr(self.scr, start_y + lh + 1, (w - 10) // 2, "NOTEWORTHY", curses.color_pair(1) | curses.A_BOLD)
+
+                btn_y = start_y + lh + 4
+                btn_w = 20
+                total_w = (btn_w * 2) + 4
+                start_x = (w - total_w) // 2
+                
+                for i, (key, label, desc) in enumerate(self.options):
+                    bx = start_x + (i * (btn_w + 4))
+                    style = curses.color_pair(2) | curses.A_BOLD if i == self.selected else curses.color_pair(4)
+                    TUI.draw_box(self.scr, btn_y, bx, 5, btn_w, "")
+                    TUI.safe_addstr(self.scr, btn_y + 2, bx + (btn_w - len(label)) // 2, label, style)
+                    TUI.safe_addstr(self.scr, btn_y + 5, bx + (btn_w - 3) // 2, f"({key.upper()})", curses.color_pair(4) | curses.A_DIM)
+            else:
+                # Horizontal Layout (Logo Left, Buttons Right)
+                total_w = 16 + 8 + 30 # Logo width + gap + Button width
+                start_x = (w - total_w) // 2
+                start_y = (h - lh) // 2
+                
+                # Logo Left
+                for i, line in enumerate(LOGO):
+                    TUI.safe_addstr(self.scr, start_y + i, start_x, line, curses.color_pair(1) | curses.A_BOLD)
+                TUI.safe_addstr(self.scr, start_y + lh + 1, start_x + 2, "NOTEWORTHY", curses.color_pair(1) | curses.A_BOLD)
+                
+                # Buttons Right (Vertical stack)
+                btn_x = start_x + 24
+                btn_start_y = start_y + (lh - 10) // 2
+                btn_w = 20
+                
+                for i, (key, label, desc) in enumerate(self.options):
+                    by = btn_start_y + (i * 6)
+                    style = curses.color_pair(2) | curses.A_BOLD if i == self.selected else curses.color_pair(4)
+                    TUI.draw_box(self.scr, by, btn_x, 5, btn_w, "")
+                    TUI.safe_addstr(self.scr, by + 2, btn_x + (btn_w - len(label)) // 2, label, style)
+                    TUI.safe_addstr(self.scr, by + 2, btn_x + btn_w + 2, f"({key.upper()}) - {desc}", curses.color_pair(4) | curses.A_DIM)
+
+            TUI.safe_addstr(self.scr, h - 1, (w - 30) // 2, "←/→/↑/↓:Select  Enter:Confirm  Q:Quit", curses.color_pair(4) | curses.A_DIM)
+            
+            self.scr.refresh()
+            
+            k = self.scr.getch()
+            if k in (ord('q'), 27): return None
+            elif k in (curses.KEY_LEFT, curses.KEY_UP): self.selected = max(0, self.selected - 1)
+            elif k in (curses.KEY_RIGHT, curses.KEY_DOWN): self.selected = min(len(self.options) - 1, self.selected + 1)
+            elif k == ord('e'): return "editor"
+            elif k == ord('b'): return "builder"
+            elif k in (curses.KEY_ENTER, 10):
+                return self.options[self.selected][1].lower()
 
 def run_app(scr, args):
     TUI.init_colors()
@@ -2394,7 +2572,20 @@ def run_app(scr, args):
                 return # User cancelled
     
     scr.clear()
-    h, w = scr.getmaxyx()
+    
+    # Show Main Menu
+    while True:
+        menu = MainMenu(scr)
+        choice = menu.run()
+        
+        if choice is None: return
+        elif choice == "editor":
+            show_editor_menu(scr)
+        elif choice == "builder":
+            break # Go to build flow
+
+    h_raw, w_raw = scr.getmaxyx()
+    h, w = h_raw - 2, w_raw - 2
     TUI.safe_addstr(scr, h // 2, (w - 24) // 2, "Syncing content files...", curses.color_pair(1) | curses.A_BOLD)
     scr.refresh()
     
