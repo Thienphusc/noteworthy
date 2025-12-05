@@ -195,76 +195,170 @@ def apply_pdf_metadata(pdf, bookmarks_file, title, author):
     return False
 
 # =============================================================================
-# CURSES HELPERS
+# TUI HELPERS
 # =============================================================================
 
-def init_colors():
-    curses.start_color()
-    curses.use_default_colors()
-    for i, color in enumerate([curses.COLOR_CYAN, curses.COLOR_GREEN, curses.COLOR_YELLOW, 
-                               curses.COLOR_WHITE, curses.COLOR_MAGENTA, curses.COLOR_RED], 1):
-        curses.init_pair(i, color, -1)
-    curses.curs_set(0)
+class TUI:
+    """Shared TUI helper functions"""
+    @staticmethod
+    def init_colors():
+        curses.start_color()
+        curses.use_default_colors()
+        for i, color in enumerate([curses.COLOR_CYAN, curses.COLOR_GREEN, curses.COLOR_YELLOW, 
+                                   curses.COLOR_WHITE, curses.COLOR_MAGENTA, curses.COLOR_RED], 1):
+            curses.init_pair(i, color, -1)
+        curses.curs_set(0)
 
-def disable_flow_control():
-    """Disable XON/XOFF flow control to allow Ctrl+S/Ctrl+Q"""
-    try:
-        fd = sys.stdin.fileno()
-        attrs = termios.tcgetattr(fd)
-        attrs[0] &= ~(termios.IXON | termios.IXOFF)  # Disable XON/XOFF
-        termios.tcsetattr(fd, termios.TCSANOW, attrs)
-    except:
-        pass  # Ignore errors if not a TTY
+    @staticmethod
+    def disable_flow_control():
+        """Disable XON/XOFF flow control to allow Ctrl+S/Ctrl+Q"""
+        try:
+            fd = sys.stdin.fileno()
+            attrs = termios.tcgetattr(fd)
+            attrs[0] &= ~(termios.IXON | termios.IXOFF)
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except: pass
 
-def safe_addstr(scr, y, x, text, attr=0):
-    try:
+    @staticmethod
+    def safe_addstr(scr, y, x, text, attr=0):
+        try:
+            h, w = scr.getmaxyx()
+            if 0 <= y < h and 0 <= x < w:
+                scr.addstr(y, x, text[:w - x - 1], attr)
+        except curses.error: pass
+
+    @staticmethod
+    def draw_box(scr, y, x, h, w, title=""):
+        try:
+            scr.addstr(y, x, "╔" + "═" * (w - 2) + "╗")
+            for i in range(1, h - 1):
+                scr.addstr(y + i, x, "║" + " " * (w - 2) + "║")
+            scr.addstr(y + h - 1, x, "╚" + "═" * (w - 2) + "╝")
+            if title:
+                scr.addstr(y, x + 2, f" {title} ", curses.color_pair(1) | curses.A_BOLD)
+        except curses.error: pass
+
+    @staticmethod
+    def prompt_save(scr):
+        """Show save confirmation prompt, returns 'y', 'n', or 'c'"""
         h, w = scr.getmaxyx()
-        if 0 <= y < h and 0 <= x < w:
-            scr.addstr(y, x, text[:w - x - 1], attr)
-    except curses.error:
-        pass
-
-def prompt_save(scr):
-    """Show save confirmation prompt, returns 'y', 'n', or 'c'"""
-    h, w = scr.getmaxyx()
-    safe_addstr(scr, h - 1, 2, "Save? (y/n/c): ", curses.color_pair(3) | curses.A_BOLD)
-    scr.refresh()
-    c = scr.getch()
-    return chr(c) if c in (ord('y'), ord('n'), ord('c')) else 'c'
-
-def show_saved(scr):
-    """Show 'Saved!' message briefly"""
-    h, w = scr.getmaxyx()
-    safe_addstr(scr, h - 1, 2, "Saved!", curses.color_pair(2) | curses.A_BOLD)
-    scr.refresh()
-    curses.napms(500)
-
-def draw_box(scr, y, x, h, w, title=""):
-    try:
-        scr.addstr(y, x, "╔" + "═" * (w - 2) + "╗")
-        for i in range(1, h - 1):
-            scr.addstr(y + i, x, "║" + " " * (w - 2) + "║")
-        scr.addstr(y + h - 1, x, "╚" + "═" * (w - 2) + "╝")
-        if title:
-            scr.addstr(y, x + 2, f" {title} ", curses.color_pair(1) | curses.A_BOLD)
-    except curses.error:
-        pass
-
-def check_terminal_size(scr):
-    while True:
-        h, w = scr.getmaxyx()
-        if h >= MIN_TERM_HEIGHT and w >= MIN_TERM_WIDTH:
-            return True
-        scr.clear()
-        y = h // 2 - 1
-        safe_addstr(scr, y, max(0, (w - 19) // 2), "Terminal too small!", curses.color_pair(6) | curses.A_BOLD)
-        safe_addstr(scr, y + 1, max(0, (w - 15) // 2), f"Current: {h}×{w}", curses.color_pair(4))
-        safe_addstr(scr, y + 2, max(0, (w - 15) // 2), f"Required: {MIN_TERM_HEIGHT}×{MIN_TERM_WIDTH}", curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(scr, h - 1, 2, "Save? (y/n/c): ", curses.color_pair(3) | curses.A_BOLD)
         scr.refresh()
-        scr.timeout(100)
-        if scr.getch() == ord('q'):
+        c = scr.getch()
+        return chr(c) if c in (ord('y'), ord('n'), ord('c')) else 'c'
+
+    @staticmethod
+    def show_saved(scr):
+        """Show 'Saved!' message briefly"""
+        h, w = scr.getmaxyx()
+        TUI.safe_addstr(scr, h - 1, 2, "Saved!", curses.color_pair(2) | curses.A_BOLD)
+        scr.refresh()
+        curses.napms(500)
+
+    @staticmethod
+    def check_terminal_size(scr):
+        while True:
+            h, w = scr.getmaxyx()
+            if h >= MIN_TERM_HEIGHT and w >= MIN_TERM_WIDTH: return True
+            scr.clear()
+            y = h // 2 - 1
+            TUI.safe_addstr(scr, y, max(0, (w - 19) // 2), "Terminal too small!", curses.color_pair(6) | curses.A_BOLD)
+            TUI.safe_addstr(scr, y + 1, max(0, (w - 15) // 2), f"Current: {h}×{w}", curses.color_pair(4))
+            TUI.safe_addstr(scr, y + 2, max(0, (w - 15) // 2), f"Required: {MIN_TERM_HEIGHT}×{MIN_TERM_WIDTH}", curses.color_pair(4) | curses.A_DIM)
+            scr.refresh()
+            scr.timeout(100)
+            if scr.getch() in (ord('q'), 27): return False
+        scr.timeout(-1)
+
+# =============================================================================
+# BASE EDITORS
+# =============================================================================
+
+class BaseEditor:
+    """Base class for full-screen editors"""
+    def __init__(self, scr, title="Editor"):
+        self.scr = scr
+        self.title = title
+        self.modified = False
+        TUI.init_colors()
+    
+    def refresh(self): raise NotImplementedError
+    def save(self): raise NotImplementedError
+    
+    def run(self):
+        self.refresh()
+        while True:
+            k = self.scr.getch()
+            if k in (ord('q'), 27): # q or Esc
+                if self.modified:
+                    c = TUI.prompt_save(self.scr)
+                    if c == 'y': self.save()
+                    elif c == 'c': self.refresh(); continue
+                return
+            elif k == ord('s') and self.save():
+                TUI.show_saved(self.scr)
+            else:
+                self._handle_input(k)
+            self.refresh()
+
+    def _handle_input(self, k): pass
+
+class ListEditor(BaseEditor):
+    """Base class for list-based editors"""
+    def __init__(self, scr, title="List Editor"):
+        super().__init__(scr, title)
+        self.items = []
+        self.cursor = 0
+        self.scroll = 0
+        self.box_title = "Items"
+        self.box_width = 70
+    
+    def _draw_item(self, y, x, item, width, selected): raise NotImplementedError
+    
+    def refresh(self):
+        h, w = self.scr.getmaxyx()
+        self.scr.clear()
+        
+        # Calculate layout
+        list_h = min(len(self.items) + 2, h - 6)
+        total_h = 2 + list_h + 2 # Title + Box + Footer
+        start_y = max(1, (h - total_h) // 2)
+        
+        # Title
+        TUI.safe_addstr(self.scr, start_y, (w - len(self.title)) // 2, self.title, curses.color_pair(1) | curses.A_BOLD)
+        
+        # Box
+        bw = min(self.box_width, w - 4)
+        bx = (w - bw) // 2
+        TUI.draw_box(self.scr, start_y + 2, bx, list_h, bw, self.box_title)
+        
+        # Items
+        vis = list_h - 2
+        if self.cursor < self.scroll: self.scroll = self.cursor
+        elif self.cursor >= self.scroll + vis: self.scroll = self.cursor - vis + 1
+        
+        for i in range(vis):
+            idx = self.scroll + i
+            if idx >= len(self.items): break
+            y = start_y + 3 + i
+            self._draw_item(y, bx, self.items[idx], bw, idx == self.cursor)
+            
+        self._draw_footer(h, w)
+        self.scr.refresh()
+        
+    def _draw_footer(self, h, w):
+        footer = "↑↓:Nav  Enter:Edit  s:Save  Esc/q:Back"
+        if self.modified: footer = "* " + footer
+        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+
+    def _handle_input(self, k):
+        if k in (curses.KEY_UP, ord('k')):
+            self.cursor = max(0, self.cursor - 1)
+        elif k in (curses.KEY_DOWN, ord('j')):
+            self.cursor = min(len(self.items) - 1, self.cursor + 1)
+        else:
             return False
-    scr.timeout(-1)
+        return True
 
 # =============================================================================
 # SCREEN DISPLAYS
@@ -293,19 +387,19 @@ def show_error_screen(scr, error):
             header = "ERROR LOG (press 'v' to go back, 'c' to copy)"
             if copied:
                 header = "ERROR LOG (copied to clipboard!)"
-            safe_addstr(scr, 0, 2, header, curses.color_pair(6) | curses.A_BOLD)
+            TUI.safe_addstr(scr, 0, 2, header, curses.color_pair(6) | curses.A_BOLD)
             for i, line in enumerate(log.split('\n')[:h-3]):
-                safe_addstr(scr, i + 2, 2, line, curses.color_pair(4))
+                TUI.safe_addstr(scr, i + 2, 2, line, curses.color_pair(4))
         else:
             y = max(0, (h - len(SAD_FACE) - 8) // 2)
             for i, line in enumerate(SAD_FACE):
-                safe_addstr(scr, y + i, (w - 9) // 2, line, curses.color_pair(6) | curses.A_BOLD)
+                TUI.safe_addstr(scr, y + i, (w - 9) // 2, line, curses.color_pair(6) | curses.A_BOLD)
             
             my = y + len(SAD_FACE) + 2
-            safe_addstr(scr, my, (w - 12) // 2, "BUILD FAILED", curses.color_pair(6) | curses.A_BOLD)
+            TUI.safe_addstr(scr, my, (w - 12) // 2, "BUILD FAILED", curses.color_pair(6) | curses.A_BOLD)
             err = str(error)[:w-10]
-            safe_addstr(scr, my + 2, (w - len(err)) // 2, err, curses.color_pair(4))
-            safe_addstr(scr, my + 4, (w - 50) // 2, "Press 'v' to view log  |  Press any other key to exit", curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(scr, my + 2, (w - len(err)) // 2, err, curses.color_pair(4))
+            TUI.safe_addstr(scr, my + 4, (w - 50) // 2, "Press 'v' to view log  |  Press any other key to exit", curses.color_pair(4) | curses.A_DIM)
         
         scr.refresh()
         key = scr.getch()
@@ -328,29 +422,29 @@ def show_success_screen(scr, page_count, has_warnings=False, typst_logs=None):
             header = "TYPST LOG (press 'v' to go back, 'c' to copy)"
             if copied:
                 header = "TYPST LOG (copied to clipboard!)"
-            safe_addstr(scr, 0, 2, header, curses.color_pair(3) | curses.A_BOLD)
+            TUI.safe_addstr(scr, 0, 2, header, curses.color_pair(3) | curses.A_BOLD)
             for i, line in enumerate(typst_logs[:h-3]):
                 c = 6 if 'error:' in line.lower() else 3 if 'warning:' in line.lower() else 4
-                safe_addstr(scr, i + 2, 2, line[:w-4], curses.color_pair(c))
+                TUI.safe_addstr(scr, i + 2, 2, line[:w-4], curses.color_pair(c))
         else:
             face = HMM_FACE if has_warnings else HAPPY_FACE
             color = curses.color_pair(3) if has_warnings else curses.color_pair(2)
             
             y = max(0, (h - len(face) - 8) // 2)
             for i, line in enumerate(face):
-                safe_addstr(scr, y + i, (w - len(face[0])) // 2, line, color | curses.A_BOLD)
+                TUI.safe_addstr(scr, y + i, (w - len(face[0])) // 2, line, color | curses.A_BOLD)
             
             my = y + len(face) + 2
             title = "BUILD SUCCEEDED (with warnings)" if has_warnings else "BUILD SUCCEEDED!"
-            safe_addstr(scr, my, (w - len(title)) // 2, title, color | curses.A_BOLD)
+            TUI.safe_addstr(scr, my, (w - len(title)) // 2, title, color | curses.A_BOLD)
             msg = f"Created: {OUTPUT_FILE} ({page_count} pages)"
-            safe_addstr(scr, my + 2, (w - len(msg)) // 2, msg, curses.color_pair(4))
+            TUI.safe_addstr(scr, my + 2, (w - len(msg)) // 2, msg, curses.color_pair(4))
             
             if has_warnings:
                 hint = "Press 'v' to view log  |  Press any other key to exit"
             else:
                 hint = "Press any key to exit..."
-            safe_addstr(scr, my + 4, (w - len(hint)) // 2, hint, curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(scr, my + 4, (w - len(hint)) // 2, hint, curses.color_pair(4) | curses.A_DIM)
         
         scr.refresh()
         key = scr.getch()
@@ -387,7 +481,7 @@ class BuildMenu:
                 # Use saved selection if available, else default to True
                 self.selected[(ci, ai)] = (ci, ai) in saved_pages if saved_pages else True
         
-        init_colors()
+        TUI.init_colors()
         self.h, self.w = scr.getmaxyx()
     
     def ch_selected(self, ci):
@@ -421,32 +515,32 @@ class BuildMenu:
                 y = by + 1 + r
                 cur = idx == self.cursor
                 
-                if cur: safe_addstr(self.scr, y, bx + 2, "▶", curses.color_pair(3) | curses.A_BOLD)
+                if cur: TUI.safe_addstr(self.scr, y, bx + 2, "▶", curses.color_pair(3) | curses.A_BOLD)
                 
                 if t == 'ch':
                     ch = self.hierarchy[ci]
                     cb = "[✓]" if self.ch_selected(ci) else "[~]" if self.ch_partial(ci) else "[ ]"
                     cc = 2 if self.ch_selected(ci) else 3 if self.ch_partial(ci) else 4
-                    safe_addstr(self.scr, y, bx + 4, cb, curses.color_pair(cc))
-                    safe_addstr(self.scr, y, bx + 7, f" Ch {ch['pages'][0]['id'][:2]}: {ch['title']}"[:bw-12], curses.color_pair(1))
+                    TUI.safe_addstr(self.scr, y, bx + 4, cb, curses.color_pair(cc))
+                    TUI.safe_addstr(self.scr, y, bx + 7, f" Ch {ch['pages'][0]['id'][:2]}: {ch['title']}"[:bw-12], curses.color_pair(1))
                 else:
                     p = self.hierarchy[ci]["pages"][ai]
                     sel = self.selected.get((ci, ai), False)
-                    safe_addstr(self.scr, y, bx + 6, "[✓]" if sel else "[ ]", curses.color_pair(2 if sel else 4))
-                    safe_addstr(self.scr, y, bx + 9, f" {p['id']}: {p['title']}"[:bw-14], curses.color_pair(4))
+                    TUI.safe_addstr(self.scr, y, bx + 6, "[✓]" if sel else "[ ]", curses.color_pair(2 if sel else 4))
+                    TUI.safe_addstr(self.scr, y, bx + 9, f" {p['id']}: {p['title']}"[:bw-14], curses.color_pair(4))
         
         def opts(sy, bx, bw):
             for i, (lbl, val, key) in enumerate([
                 ("Debug Mode:", self.debug, "d"), ("Frontmatter:", self.frontmatter, "f"), ("Leave PDFs:", self.leave_pdfs, "l")
             ]):
-                safe_addstr(self.scr, sy + 1 + i, bx + 2, f"{lbl:14}", curses.color_pair(4))
-                safe_addstr(self.scr, sy + 1 + i, bx + 16, "[ON] " if val else "[OFF]", curses.color_pair(2 if val else 6) | curses.A_BOLD)
-                safe_addstr(self.scr, sy + 1 + i, bx + 22, f"({key})", curses.color_pair(4) | curses.A_DIM)
+                TUI.safe_addstr(self.scr, sy + 1 + i, bx + 2, f"{lbl:14}", curses.color_pair(4))
+                TUI.safe_addstr(self.scr, sy + 1 + i, bx + 16, "[ON] " if val else "[OFF]", curses.color_pair(2 if val else 6) | curses.A_BOLD)
+                TUI.safe_addstr(self.scr, sy + 1 + i, bx + 22, f"({key})", curses.color_pair(4) | curses.A_DIM)
             
             flags = " ".join(self.typst_flags) or "(none)"
-            safe_addstr(self.scr, sy + 4, bx + 2, "Typst Flags:  ", curses.color_pair(4))
-            safe_addstr(self.scr, sy + 4, bx + 16, flags[:bw-20], curses.color_pair(5 if self.typst_flags else 4) | curses.A_DIM)
-            safe_addstr(self.scr, sy + 5, bx + 16, "(c)", curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(self.scr, sy + 4, bx + 2, "Typst Flags:  ", curses.color_pair(4))
+            TUI.safe_addstr(self.scr, sy + 4, bx + 16, flags[:bw-20], curses.color_pair(5 if self.typst_flags else 4) | curses.A_DIM)
+            TUI.safe_addstr(self.scr, sy + 5, bx + 16, "(c)", curses.color_pair(4) | curses.A_DIM)
         
         if layout == "compact":
             lw, rw = 20, min(50, self.w - 24)
@@ -454,12 +548,12 @@ class BuildMenu:
             rx = lx + lw + 2
             ly = max(0, (self.h - lh) // 2 - 1)
             for i, line in enumerate(LOGO[:self.h-1]):
-                safe_addstr(self.scr, ly + i, lx + 3, line, curses.color_pair(1) | curses.A_BOLD)
-            safe_addstr(self.scr, ly + lh, lx + (lw - 10) // 2, "NOTEWORTHY", curses.color_pair(1) | curses.A_BOLD)
-            draw_box(self.scr, 0, rx, obh, rw, "Options")
+                TUI.safe_addstr(self.scr, ly + i, lx + 3, line, curses.color_pair(1) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, ly + lh, lx + (lw - 10) // 2, "NOTEWORTHY", curses.color_pair(1) | curses.A_BOLD)
+            TUI.draw_box(self.scr, 0, rx, obh, rw, "Options")
             opts(0, rx, rw)
             ch = max(3, self.h - obh - 3)
-            draw_box(self.scr, obh + 1, rx, ch, rw, "Select Chapters")
+            TUI.draw_box(self.scr, obh + 1, rx, ch, rw, "Select Chapters")
             items(obh + 1, rx, rw, ch)
         elif layout == "horz":
             total_h = lh + 2 + obh
@@ -469,12 +563,12 @@ class BuildMenu:
             rx = lx + lbw + 2
             lgx = lx + (lbw - 14) // 2
             for i, line in enumerate(LOGO[:self.h-2]):
-                safe_addstr(self.scr, start_y + i, lgx, line, curses.color_pair(1) | curses.A_BOLD)
-            safe_addstr(self.scr, start_y + lh, lx + (lbw - 10) // 2, "NOTEWORTHY", curses.color_pair(1) | curses.A_BOLD)
-            draw_box(self.scr, start_y + lh + 2, lx, obh, lbw, "Options")
+                TUI.safe_addstr(self.scr, start_y + i, lgx, line, curses.color_pair(1) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, start_y + lh, lx + (lbw - 10) // 2, "NOTEWORTHY", curses.color_pair(1) | curses.A_BOLD)
+            TUI.draw_box(self.scr, start_y + lh + 2, lx, obh, lbw, "Options")
             opts(start_y + lh + 2, lx, lbw)
             ch = min(lh + 2 + obh, self.h - 2)
-            draw_box(self.scr, start_y, rx, ch, rbw, "Select Chapters")
+            TUI.draw_box(self.scr, start_y, rx, ch, rbw, "Select Chapters")
             items(start_y, rx, rbw, ch)
         else:
             ch_rows = min(len(self.items) + 2, 10)
@@ -482,23 +576,23 @@ class BuildMenu:
             start_y = max(0, (self.h - total_h) // 2)
             lgx = (self.w - 14) // 2
             for i, line in enumerate(LOGO):
-                safe_addstr(self.scr, start_y + i, lgx, line, curses.color_pair(1) | curses.A_BOLD)
-            safe_addstr(self.scr, start_y + lh + 1, (self.w - 10) // 2, "NOTEWORTHY", curses.color_pair(1) | curses.A_BOLD)
+                TUI.safe_addstr(self.scr, start_y + i, lgx, line, curses.color_pair(1) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, start_y + lh + 1, (self.w - 10) // 2, "NOTEWORTHY", curses.color_pair(1) | curses.A_BOLD)
             bw, bx = min(60, self.w - 4), (self.w - min(60, self.w - 4)) // 2
-            draw_box(self.scr, start_y + lh + 3, bx, obh, bw, "Options")
+            TUI.draw_box(self.scr, start_y + lh + 3, bx, obh, bw, "Options")
             opts(start_y + lh + 3, bx, bw)
             cy = start_y + lh + 3 + obh + 1
             ch = min(len(self.items) + 2, self.h - cy - 3)
-            draw_box(self.scr, cy, bx, ch, bw, "Select Chapters")
+            TUI.draw_box(self.scr, cy, bx, ch, bw, "Select Chapters")
             items(cy, bx, bw, ch)
         
-        safe_addstr(self.scr, self.h - 1, (self.w - 78) // 2, "e:Configure  |  ↑↓:Nav  Space:Toggle  a:All  n:None  Enter:Build  Esc/q:Quit", curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(self.scr, self.h - 1, (self.w - 78) // 2, "e:Configure  |  ↑↓:Nav  Space:Toggle  a:All  n:None  Enter:Build  Esc/q:Quit", curses.color_pair(4) | curses.A_DIM)
         self.scr.refresh()
     
     def run(self):
         self.refresh()
         while True:
-            if not check_terminal_size(self.scr): return None
+            if not TUI.check_terminal_size(self.scr): return None
             
             k = self.scr.getch()
             if k in (ord('q'), 27): return None  # q or Esc
@@ -585,8 +679,8 @@ def hex_to_curses_color(hex_color):
 
 def show_editor_menu(scr):
     """Show menu to select which editor to open, returns immediately after editor closes"""
-    init_colors()
-    disable_flow_control()  # Allow Ctrl+S to work in editors
+    TUI.init_colors()
+    TUI.disable_flow_control()  # Allow Ctrl+S to work in editors
     cursor = 0
     options = [
         ("1", "Config Editor", "Document settings"),
@@ -606,20 +700,20 @@ def show_editor_menu(scr):
         total_h = title_h + list_h + 2
         start_y = max(1, (h - total_h) // 2)
         
-        safe_addstr(scr, start_y, (w - 14) // 2, "SELECT EDITOR", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(scr, start_y, (w - 14) // 2, "SELECT EDITOR", curses.color_pair(1) | curses.A_BOLD)
         
         bw = min(55, w - 4)
         bx = (w - bw) // 2
-        draw_box(scr, start_y + 2, bx, list_h, bw, "Editors")
+        TUI.draw_box(scr, start_y + 2, bx, list_h, bw, "Editors")
         
         for i, (key, name, desc) in enumerate(options):
             y = start_y + 3 + i
             if i == cursor:
-                safe_addstr(scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
-            safe_addstr(scr, y, bx + 4, f"{key}. {name}", curses.color_pair(4) | (curses.A_BOLD if i == cursor else 0))
-            safe_addstr(scr, y, bx + 25, desc[:bw-27], curses.color_pair(4) | curses.A_DIM)
+                TUI.safe_addstr(scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
+            TUI.safe_addstr(scr, y, bx + 4, f"{key}. {name}", curses.color_pair(4) | (curses.A_BOLD if i == cursor else 0))
+            TUI.safe_addstr(scr, y, bx + 25, desc[:bw-27], curses.color_pair(4) | curses.A_DIM)
         
-        safe_addstr(scr, h - 1, (w - 32) // 2, "↑↓:Nav  Enter:Select  Esc/q:Back", curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(scr, h - 1, (w - 32) // 2, "↑↓:Nav  Enter:Select  Esc/q:Back", curses.color_pair(4) | curses.A_DIM)
         scr.refresh()
         
         k = scr.getch()
@@ -632,249 +726,190 @@ def show_editor_menu(scr):
             if idx == 0: ConfigEditor(scr).run()
             elif idx == 1: HierarchyEditor(scr).run()
             elif idx == 2: SchemeEditor(scr).run()
-            elif idx == 3: TextEditor(scr, PREFACE_FILE, "Preface Editor").run()
+            elif idx == 3: TextEditor(scr, PREFACE_FILE, title="Preface Editor").run()
             elif idx == 4: SnippetsEditor(scr).run()
 
 
-class TextEditor:
-    """Nano-like text editor with soft wrapping"""
-    def __init__(self, scr, filepath=None, title="Editor", initial_text=None):
-        self.scr = scr
-        self.filepath = filepath
-        self.title = title
-        
+class TextEditor(BaseEditor):
+    """Full-screen text editor with soft-wrapping"""
+    def __init__(self, scr, filepath=None, initial_text=None, title="Text Editor"):
+        super().__init__(scr, title)
+        self.filepath = Path(filepath) if filepath else None
         if initial_text is not None:
             self.lines = initial_text.split('\n')
-        elif filepath and filepath.exists():
-            self.lines = filepath.read_text().split('\n')
+        elif self.filepath and self.filepath.exists():
+            self.lines = self.filepath.read_text().split('\n')
         else:
             self.lines = [""]
-            
-        self.cy, self.cx = 0, 0 # Logical cursor position
-        self.sy = 0 # Visual scroll offset
-        self.modified = False
-        init_colors()
-        
-    def _get_visual_lines(self, width):
-        """Convert logical lines to visual lines based on width"""
-        visual_lines = []
-        for i, line in enumerate(self.lines):
-            if not line:
-                visual_lines.append(("", i, 0))
-                continue
-                
-            curr = 0
-            while curr < len(line):
-                # Find split point
-                rem_len = len(line) - curr
-                if rem_len <= width:
-                    visual_lines.append((line[curr:], i, curr))
-                    break
-                
-                # Soft wrap logic
-                limit = curr + width
-                sub = line[curr:limit]
-                last_space = sub.rfind(' ')
-                
-                if last_space != -1:
-                    split = curr + last_space + 1
-                else:
-                    split = limit
-                    
-                visual_lines.append((line[curr:split], i, curr))
-                curr = split
-        return visual_lines
-
+        self.cy, self.cx = 0, 0
+        self.scroll_y = 0
+        self.preferred_x = 0
+    
     def save(self):
         if self.filepath:
             try:
                 self.filepath.write_text('\n'.join(self.lines))
-                self.modified = False
-                return True
+                self.modified = False; return True
             except: return False
-        else:
-            return '\n'.join(self.lines)
+        return True
     
     def refresh(self):
         h, w = self.scr.getmaxyx()
         self.scr.clear()
-        fname = self.filepath.name if self.filepath else "New Text"
-        header = f" {self.title} - {fname} "
-        if self.modified: header = "* " + header
-        safe_addstr(self.scr, 0, 0, "─" * w, curses.color_pair(1))
-        safe_addstr(self.scr, 0, 2, header, curses.color_pair(1) | curses.A_BOLD)
         
-        # Calculate layout
-        content_w = w - 6 # 4 chars for line num, 1 space, 1 margin
-        visual_lines = self._get_visual_lines(content_w)
+        # Title
+        title_str = f"{self.title} {'*' if self.modified else ''}"
+        TUI.safe_addstr(self.scr, 0, (w - len(title_str)) // 2, title_str, curses.color_pair(1) | curses.A_BOLD)
         
-        # Find visual cursor position
-        vcy, vcx = 0, 0
+        # Calculate visual lines
+        visual_lines = self._get_visual_lines(w - 5)
+        
+        # Adjust scroll
+        vcy = 0
         for i, (text, l_idx, start_idx) in enumerate(visual_lines):
             if l_idx == self.cy:
-                if self.cx >= start_idx and self.cx <= start_idx + len(text):
-                    # Found the line containing cursor
-                    # Special case: if cursor is at exact end of a wrapped line (not last part), 
-                    # it should technically be on next line? No, typical behavior is end of line.
-                    # But if self.cx == start_idx + len(text) and it's not the last chunk...
-                    # Let's stick to: cursor stays on the chunk where it fits.
-                    # If it's exactly at split point, prefer next line?
-                    # Actually, standard is: if I type at end of line, it wraps.
-                    # If self.cx == start_idx + len(text) and there is a next chunk for same line,
-                    # then cursor should be at start of next chunk.
-                    
-                    is_last_chunk = True
-                    if i + 1 < len(visual_lines):
-                        next_l_idx = visual_lines[i+1][1]
-                        if next_l_idx == l_idx: is_last_chunk = False
-                    
-                    if self.cx == start_idx + len(text) and not is_last_chunk:
-                        continue # Match on next chunk
-                        
-                    vcy = i
-                    vcx = self.cx - start_idx
-                    break
+                is_last_chunk = True
+                if i + 1 < len(visual_lines) and visual_lines[i+1][1] == l_idx: is_last_chunk = False
+                if self.cx >= start_idx and (self.cx < start_idx + len(text) or (self.cx == start_idx + len(text) and is_last_chunk)):
+                    vcy = i; break
         
-        # Scroll
-        ch = h - 3
-        if vcy < self.sy: self.sy = vcy
-        elif vcy >= self.sy + ch: self.sy = vcy - ch + 1
+        if vcy < self.scroll_y: self.scroll_y = vcy
+        elif vcy >= self.scroll_y + (h - 2): self.scroll_y = vcy - (h - 3)
         
-        # Draw
-        for i in range(ch):
-            idx = self.sy + i
+        # Draw lines
+        for i in range(h - 2):
+            idx = self.scroll_y + i
             if idx >= len(visual_lines): break
-            
             text, l_idx, start_idx = visual_lines[idx]
-            y = 1 + i
-            
-            # Line number only for first chunk
+            y = i + 1
             if start_idx == 0:
-                safe_addstr(self.scr, y, 0, f"{l_idx + 1:4} ", curses.color_pair(4) | curses.A_DIM)
+                TUI.safe_addstr(self.scr, y, 0, f"{l_idx + 1:3d} ", curses.color_pair(4) | curses.A_DIM)
             else:
-                safe_addstr(self.scr, y, 0, "     ", curses.color_pair(4))
-                
-            safe_addstr(self.scr, y, 5, text, curses.color_pair(4))
+                TUI.safe_addstr(self.scr, y, 0, "    · ", curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(self.scr, y, 6, text)
         
-        safe_addstr(self.scr, h - 2, 0, "─" * w, curses.color_pair(1))
-        safe_addstr(self.scr, h - 1, 2, f"^S:Save  ^X:Exit  Ln {self.cy + 1}, Col {self.cx + 1}", curses.color_pair(4) | curses.A_DIM)
+        # Footer
+        footer = "Ctrl+S:Save  Ctrl+X:Exit"
+        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
         
-        # Move cursor
-        screen_y = 1 + vcy - self.sy
-        screen_x = 5 + vcx
-        if 1 <= screen_y < h - 2 and 5 <= screen_x < w:
-            try: self.scr.move(screen_y, screen_x)
-            except: pass
+        # Cursor
+        cur_y = vcy - self.scroll_y + 1
+        cur_x = 6 + (self.cx - visual_lines[vcy][2])
+        if 0 <= cur_y < h - 1 and 0 <= cur_x < w:
+            self.scr.move(cur_y, cur_x)
         self.scr.refresh()
-        
-        return visual_lines # Return for use in run()
+
+    def _get_visual_lines(self, width):
+        visual_lines = []
+        for l_idx, line in enumerate(self.lines):
+            if not line:
+                visual_lines.append(("", l_idx, 0))
+                continue
+            i = 0
+            while i < len(line):
+                chunk = line[i:i+width]
+                if len(chunk) < width:
+                    visual_lines.append((chunk, l_idx, i))
+                    i += len(chunk)
+                else:
+                    last_space = chunk.rfind(' ')
+                    if last_space != -1:
+                        visual_lines.append((chunk[:last_space], l_idx, i))
+                        i += last_space + 1
+                    else:
+                        visual_lines.append((chunk, l_idx, i))
+                        i += width
+        return visual_lines
 
     def run(self):
-        curses.curs_set(1)
-        disable_flow_control()  # Allow Ctrl+S to work
+        TUI.disable_flow_control()
+        self.refresh()
         while True:
-            visual_lines = self.refresh()
             k = self.scr.getch()
-            
-            if k == 24:  # Ctrl+X
+            if k == 24: # Ctrl+X
                 if self.modified:
-                    h, w = self.scr.getmaxyx()
-                    safe_addstr(self.scr, h - 1, 2, "Save? (y/n/c): ", curses.color_pair(3) | curses.A_BOLD)
-                    self.scr.refresh()
-                    c = self.scr.getch()
-                    if c == ord('y'):
-                        res = self.save()
-                        if not self.filepath: return res
-                        return True
-                    elif c == ord('c'): continue
-                return None if not self.filepath else True
-            elif k == 19:  # Ctrl+S
-                res = self.save()
-                if res:
-                    h, w = self.scr.getmaxyx()
-                    safe_addstr(self.scr, h - 1, 2, "Saved!", curses.color_pair(2) | curses.A_BOLD)
-                    self.scr.refresh(); curses.napms(500)
-                    if not self.filepath: return res
-            
-            # Navigation
-            elif k == curses.KEY_UP:
-                # Find current visual line index
-                vcy = 0
-                for i, (text, l_idx, start_idx) in enumerate(visual_lines):
-                    if l_idx == self.cy:
-                        is_last_chunk = True
-                        if i + 1 < len(visual_lines) and visual_lines[i+1][1] == l_idx: is_last_chunk = False
-                        if self.cx >= start_idx and (self.cx < start_idx + len(text) or (self.cx == start_idx + len(text) and is_last_chunk)):
-                            vcy = i; break
-                
-                if vcy > 0:
-                    target_vcy = vcy - 1
-                    t_text, t_lidx, t_start = visual_lines[target_vcy]
-                    # Try to keep same visual x offset
-                    curr_vx = self.cx - visual_lines[vcy][2]
-                    self.cy = t_lidx
-                    self.cx = t_start + min(curr_vx, len(t_text))
-                    
-            elif k == curses.KEY_DOWN:
-                vcy = 0
-                for i, (text, l_idx, start_idx) in enumerate(visual_lines):
-                    if l_idx == self.cy:
-                        is_last_chunk = True
-                        if i + 1 < len(visual_lines) and visual_lines[i+1][1] == l_idx: is_last_chunk = False
-                        if self.cx >= start_idx and (self.cx < start_idx + len(text) or (self.cx == start_idx + len(text) and is_last_chunk)):
-                            vcy = i; break
-                            
-                if vcy < len(visual_lines) - 1:
-                    target_vcy = vcy + 1
-                    t_text, t_lidx, t_start = visual_lines[target_vcy]
-                    curr_vx = self.cx - visual_lines[vcy][2]
-                    self.cy = t_lidx
-                    self.cx = t_start + min(curr_vx, len(t_text))
-            
-            elif k == curses.KEY_LEFT:
-                if self.cx > 0: self.cx -= 1
-                elif self.cy > 0: self.cy -= 1; self.cx = len(self.lines[self.cy])
-            elif k == curses.KEY_RIGHT:
-                if self.cx < len(self.lines[self.cy]): self.cx += 1
-                elif self.cy < len(self.lines) - 1: self.cy += 1; self.cx = 0
-            elif k == curses.KEY_HOME: self.cx = 0
-            elif k == curses.KEY_END: self.cx = len(self.lines[self.cy])
-            
-            # Editing
-            elif k in (curses.KEY_BACKSPACE, 127, 8):
-                if self.cx > 0:
-                    self.lines[self.cy] = self.lines[self.cy][:self.cx-1] + self.lines[self.cy][self.cx:]
-                    self.cx -= 1; self.modified = True
-                elif self.cy > 0:
-                    pl = len(self.lines[self.cy - 1])
-                    self.lines[self.cy - 1] += self.lines[self.cy]
-                    del self.lines[self.cy]; self.cy -= 1; self.cx = pl; self.modified = True
-            elif k == curses.KEY_DC:
-                if self.cx < len(self.lines[self.cy]):
-                    self.lines[self.cy] = self.lines[self.cy][:self.cx] + self.lines[self.cy][self.cx+1:]
-                    self.modified = True
-                elif self.cy < len(self.lines) - 1:
-                    self.lines[self.cy] += self.lines[self.cy + 1]
-                    del self.lines[self.cy + 1]; self.modified = True
-            elif k in (ord('\n'), 10):
-                self.lines.insert(self.cy + 1, self.lines[self.cy][self.cx:])
-                self.lines[self.cy] = self.lines[self.cy][:self.cx]
-                self.cy += 1; self.cx = 0; self.modified = True
-            elif k == 9: # Tab
-                self.lines[self.cy] = self.lines[self.cy][:self.cx] + "    " + self.lines[self.cy][self.cx:]
-                self.cx += 4; self.modified = True
-            elif 32 <= k <= 126:
-                self.lines[self.cy] = self.lines[self.cy][:self.cx] + chr(k) + self.lines[self.cy][self.cx:]
-                self.cx += 1; self.modified = True
+                    c = TUI.prompt_save(self.scr)
+                    if c == 'y': self.save()
+                    elif c == 'c': self.refresh(); continue
+                return '\n'.join(self.lines) if not self.filepath else None
+            elif k == 19: # Ctrl+S
+                if self.save(): TUI.show_saved(self.scr)
+            else:
+                self._handle_input(k)
+            self.refresh()
+
+    def _handle_input(self, k):
+        visual_lines = self._get_visual_lines(self.scr.getmaxyx()[1] - 5)
+        if k == curses.KEY_UP:
+            vcy = 0
+            for i, (text, l_idx, start_idx) in enumerate(visual_lines):
+                if l_idx == self.cy:
+                    is_last_chunk = True
+                    if i + 1 < len(visual_lines) and visual_lines[i+1][1] == l_idx: is_last_chunk = False
+                    if self.cx >= start_idx and (self.cx < start_idx + len(text) or (self.cx == start_idx + len(text) and is_last_chunk)):
+                        vcy = i; break
+            if vcy > 0:
+                target_vcy = vcy - 1
+                t_text, t_lidx, t_start = visual_lines[target_vcy]
+                curr_vx = self.cx - visual_lines[vcy][2]
+                self.cy = t_lidx
+                self.cx = t_start + min(curr_vx, len(t_text))
+        elif k == curses.KEY_DOWN:
+            vcy = 0
+            for i, (text, l_idx, start_idx) in enumerate(visual_lines):
+                if l_idx == self.cy:
+                    is_last_chunk = True
+                    if i + 1 < len(visual_lines) and visual_lines[i+1][1] == l_idx: is_last_chunk = False
+                    if self.cx >= start_idx and (self.cx < start_idx + len(text) or (self.cx == start_idx + len(text) and is_last_chunk)):
+                        vcy = i; break
+            if vcy < len(visual_lines) - 1:
+                target_vcy = vcy + 1
+                t_text, t_lidx, t_start = visual_lines[target_vcy]
+                curr_vx = self.cx - visual_lines[vcy][2]
+                self.cy = t_lidx
+                self.cx = t_start + min(curr_vx, len(t_text))
+        elif k == curses.KEY_LEFT:
+            if self.cx > 0: self.cx -= 1
+            elif self.cy > 0: self.cy -= 1; self.cx = len(self.lines[self.cy])
+        elif k == curses.KEY_RIGHT:
+            if self.cx < len(self.lines[self.cy]): self.cx += 1
+            elif self.cy < len(self.lines) - 1: self.cy += 1; self.cx = 0
+        elif k == curses.KEY_HOME: self.cx = 0
+        elif k == curses.KEY_END: self.cx = len(self.lines[self.cy])
+        elif k in (curses.KEY_BACKSPACE, 127, 8):
+            if self.cx > 0:
+                self.lines[self.cy] = self.lines[self.cy][:self.cx-1] + self.lines[self.cy][self.cx:]
+                self.cx -= 1; self.modified = True
+            elif self.cy > 0:
+                pl = len(self.lines[self.cy - 1])
+                self.lines[self.cy - 1] += self.lines[self.cy]
+                del self.lines[self.cy]; self.cy -= 1; self.cx = pl; self.modified = True
+        elif k == curses.KEY_DC:
+            if self.cx < len(self.lines[self.cy]):
+                self.lines[self.cy] = self.lines[self.cy][:self.cx] + self.lines[self.cy][self.cx+1:]
+                self.modified = True
+            elif self.cy < len(self.lines) - 1:
+                self.lines[self.cy] += self.lines[self.cy + 1]
+                del self.lines[self.cy + 1]; self.modified = True
+        elif k in (ord('\n'), 10):
+            self.lines.insert(self.cy + 1, self.lines[self.cy][self.cx:])
+            self.lines[self.cy] = self.lines[self.cy][:self.cx]
+            self.cy += 1; self.cx = 0; self.modified = True
+        elif k == 9:
+            self.lines[self.cy] = self.lines[self.cy][:self.cx] + "    " + self.lines[self.cy][self.cx:]
+            self.cx += 4; self.modified = True
+        elif 32 <= k <= 126:
+            self.lines[self.cy] = self.lines[self.cy][:self.cx] + chr(k) + self.lines[self.cy][self.cx:]
+            self.cx += 1; self.modified = True
         curses.curs_set(0)
+        return True
 
 
-class ConfigEditor:
-    """Field-based config editor with popup editing"""
+class ConfigEditor(ListEditor):
+    """Field-based config editor"""
     def __init__(self, scr):
-        self.scr = scr
+        super().__init__(scr, "CONFIG EDITOR")
         self.config = json.loads(CONFIG_FILE.read_text())
-        self.cursor, self.scroll, self.modified = 0, 0, False
         themes = extract_themes()
         self.fields = [
             ("title", "Title", "str"), ("subtitle", "Subtitle", "str"),
@@ -889,126 +924,94 @@ class ConfigEditor:
             ("box-margin", "Box Margin", "str"), ("box-inset", "Box Inset", "str"),
             ("render-sample-count", "Render Samples", "int"),
         ]
-        init_colors()
-    
+        self.items = self.fields
+        self.box_title = "Settings"
+
     def get_display(self, key):
         v = self.config.get(key)
         if v is None: return "(none)"
         if isinstance(v, bool): return "ON" if v else "OFF"
         if isinstance(v, list): return ", ".join(str(x) for x in v)
         return str(v)
-    
+
     def save(self):
         try:
             CONFIG_FILE.write_text(json.dumps(self.config, indent=4))
             self.modified = False; return True
         except: return False
-    
-    def refresh(self):
-        h, w = self.scr.getmaxyx()
-        self.scr.clear()
+
+    def _draw_item(self, y, x, item, width, selected):
+        key, label, ftype = item[0], item[1], item[2]
         
-        # Calculate layout - vertically centered
-        title_h = 2
-        list_h = min(len(self.fields) + 2, h - 6)
-        total_h = title_h + list_h + 2
-        start_y = max(1, (h - total_h) // 2)
+        if selected: TUI.safe_addstr(self.scr, y, x + 2, ">", curses.color_pair(3) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, y, x + 4, f"{label}:", curses.color_pair(4))
         
-        # Title
-        safe_addstr(self.scr, start_y, (w - 14) // 2, "CONFIG EDITOR", curses.color_pair(1) | curses.A_BOLD)
+        val_x = x + 22
+        val = self.get_display(key)
+        if ftype == "bool":
+            c = curses.color_pair(2) if self.config.get(key) else curses.color_pair(6)
+            TUI.safe_addstr(self.scr, y, val_x, val, c | curses.A_BOLD)
+        elif ftype == "choice":
+            TUI.safe_addstr(self.scr, y, val_x, val[:width-26], curses.color_pair(5) | curses.A_BOLD)
+        else:
+            TUI.safe_addstr(self.scr, y, val_x, val[:width-26], curses.color_pair(4))
+
+    def _draw_footer(self, h, w):
+        footer = "↑↓:Nav  Enter:Edit  Space:Toggle  s:Save  Esc/q:Back"
+        if self.modified: footer = "* " + footer
+        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+
+    def _handle_input(self, k):
+        if super()._handle_input(k): return True
         
-        bw, bx = min(70, w - 4), (w - min(70, w - 4)) // 2
-        draw_box(self.scr, start_y + 2, bx, list_h, bw, "Settings")
+        f = self.items[self.cursor]; key, ftype = f[0], f[2]
         
-        vis = list_h - 2
-        if self.cursor < self.scroll: self.scroll = self.cursor
-        elif self.cursor >= self.scroll + vis: self.scroll = self.cursor - vis + 1
-        
-        for i in range(vis):
-            idx = self.scroll + i
-            if idx >= len(self.fields): break
-            f = self.fields[idx]; key, label, ftype = f[0], f[1], f[2]
-            y = start_y + 3 + i; cur = idx == self.cursor
-            
-            if cur: safe_addstr(self.scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
-            safe_addstr(self.scr, y, bx + 4, f"{label}:", curses.color_pair(4))
-            
-            val_x = bx + 22
-            val = self.get_display(key)
+        if k in (ord('\n'), 10):
             if ftype == "bool":
-                c = curses.color_pair(2) if self.config.get(key) else curses.color_pair(6)
-                safe_addstr(self.scr, y, val_x, val, c | curses.A_BOLD)
+                self.config[key] = not self.config.get(key, False); self.modified = True
             elif ftype == "choice":
-                safe_addstr(self.scr, y, val_x, val[:bw-26], curses.color_pair(5) | curses.A_BOLD)
+                opts = f[3]; cur = self.config.get(key, opts[0])
+                try: ni = (opts.index(cur) + 1) % len(opts)
+                except: ni = 0
+                self.config[key] = opts[ni]; self.modified = True
             else:
-                safe_addstr(self.scr, y, val_x, val[:bw-26], curses.color_pair(4))
+                curr_val = self.config.get(key)
+                if isinstance(curr_val, list): curr_str = ", ".join(str(x) for x in curr_val)
+                else: curr_str = str(curr_val) if curr_val is not None else ""
+                
+                new_val = TextEditor(self.scr, initial_text=curr_str, title=f"Edit {f[1]}").run()
+                
+                if new_val is not None:
+                    if ftype == "int":
+                        try: self.config[key] = int(new_val)
+                        except: pass
+                    elif ftype == "list":
+                        cleaned_val = new_val.replace('\n', ',')
+                        self.config[key] = [s.strip() for s in cleaned_val.split(",") if s.strip()]
+                    elif new_val.lower() in ("none", "null", ""): self.config[key] = None
+                    else: self.config[key] = new_val
+                    self.modified = True
+            return True
+        elif k == ord(' '):
+            if ftype == "bool": self.config[key] = not self.config.get(key, False); self.modified = True
+            elif ftype == "choice":
+                opts = f[3]; cur = self.config.get(key, opts[0])
+                try: ni = (opts.index(cur) + 1) % len(opts)
+                except: ni = 0
+                self.config[key] = opts[ni]; self.modified = True
+            return True
         
-        footer = "* ↑↓:Nav  Enter:Edit  Space:Toggle  s:Save  Esc/q:Back" if self.modified else "↑↓:Nav  Enter:Edit  Space:Toggle  s:Save  Esc/q:Back"
-        safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
-        self.scr.refresh()
-    
-    def run(self):
-        self.refresh()
-        while True:
-            k = self.scr.getch()
-            
-            if k in (ord('q'), 27):  # q or Esc
-                if self.modified:
-                    c = prompt_save(self.scr)
-                    if c == 'y': self.save()
-                    elif c == 'c': self.refresh(); continue
-                return
-            elif k in (curses.KEY_UP, ord('k')): self.cursor = max(0, self.cursor - 1)
-            elif k in (curses.KEY_DOWN, ord('j')): self.cursor = min(len(self.fields) - 1, self.cursor + 1)
-            elif k in (ord('\n'), 10):
-                f = self.fields[self.cursor]; key, ftype = f[0], f[2]
-                if ftype == "bool":
-                    self.config[key] = not self.config.get(key, False); self.modified = True
-                elif ftype == "choice":
-                    opts = f[3]; cur = self.config.get(key, opts[0])
-                    try: ni = (opts.index(cur) + 1) % len(opts)
-                    except: ni = 0
-                    self.config[key] = opts[ni]; self.modified = True
-                else:
-                    curr_val = self.config.get(key)
-                    if isinstance(curr_val, list): curr_str = ", ".join(str(x) for x in curr_val)
-                    else: curr_str = str(curr_val) if curr_val is not None else ""
-                    
-                    new_val = TextEditor(self.scr, initial_text=curr_str, title=f"Edit {f[1]}").run()
-                    
-                    if new_val is not None:
-                        if ftype == "int":
-                            try: self.config[key] = int(new_val)
-                            except: pass
-                        elif ftype == "list":
-                            # Handle both commas and newlines as separators
-                            cleaned_val = new_val.replace('\n', ',')
-                            self.config[key] = [s.strip() for s in cleaned_val.split(",") if s.strip()]
-                        elif new_val.lower() in ("none", "null", ""): self.config[key] = None
-                        else: self.config[key] = new_val
-                        self.modified = True
-            elif k == ord(' '):
-                f = self.fields[self.cursor]
-                if f[2] == "bool": self.config[f[0]] = not self.config.get(f[0], False); self.modified = True
-                elif f[2] == "choice":
-                    opts = f[3]; cur = self.config.get(f[0], opts[0])
-                    try: ni = (opts.index(cur) + 1) % len(opts)
-                    except: ni = 0
-                    self.config[f[0]] = opts[ni]; self.modified = True
-            elif k == ord('s') and self.save():
-                show_saved(self.scr)
-            self.refresh()
+        return False
 
 
-class HierarchyEditor:
-    """Structured hierarchy editor with popup editing"""
+class HierarchyEditor(ListEditor):
+    """Structured hierarchy editor"""
     def __init__(self, scr):
-        self.scr = scr
+        super().__init__(scr, "HIERARCHY EDITOR")
         self.hierarchy = json.loads(HIERARCHY_FILE.read_text())
-        self.cursor, self.scroll, self.modified = 0, 0, False
-        self.items = []
         self._build_items()
-        init_colors()
+        self.box_title = "Structure"
+        self.box_width = 75
     
     def _build_items(self):
         self.items = []
@@ -1018,9 +1021,7 @@ class HierarchyEditor:
             for pi, pg in enumerate(ch.get("pages", [])):
                 self.items.append(("pg_id", ci, pi, pg.get("id", "")))
                 self.items.append(("pg_title", ci, pi, pg.get("title", "")))
-            # Add "new page" option after each chapter's pages
             self.items.append(("add_page", ci, None, None))
-        # Add "new chapter" option at the end
         self.items.append(("add_chapter", None, None, None))
     
     def _get_value(self, item):
@@ -1046,19 +1047,15 @@ class HierarchyEditor:
         self.hierarchy.append(new_ch)
         self.modified = True
         self._build_items()
-        # Move cursor to the new chapter title
         for i, item in enumerate(self.items):
             if item[0] == "ch_title" and item[1] == len(self.hierarchy) - 1:
-                self.cursor = i
-                break
+                self.cursor = i; break
     
     def _add_page(self, ci):
-        # Generate a new page ID
         existing_ids = [p["id"] for ch in self.hierarchy for p in ch.get("pages", [])]
         ch_prefix = f"{ci+1:02d}"
         page_num = 1
-        while f"{ch_prefix}.{page_num:02d}" in existing_ids:
-            page_num += 1
+        while f"{ch_prefix}.{page_num:02d}" in existing_ids: page_num += 1
         new_id = f"{ch_prefix}.{page_num:02d}"
         
         new_page = {"id": new_id, "title": "New Page"}
@@ -1069,14 +1066,12 @@ class HierarchyEditor:
     def _delete_current(self):
         t, ci, pi, _ = self.items[self.cursor]
         if t in ("ch_title", "ch_summary"):
-            # Delete entire chapter
-            if len(self.hierarchy) > 1:  # Keep at least one chapter
+            if len(self.hierarchy) > 1:
                 del self.hierarchy[ci]
                 self.modified = True
                 self._build_items()
                 self.cursor = min(self.cursor, len(self.items) - 1)
         elif t in ("pg_id", "pg_title"):
-            # Delete page
             del self.hierarchy[ci]["pages"][pi]
             self.modified = True
             self._build_items()
@@ -1087,96 +1082,63 @@ class HierarchyEditor:
             HIERARCHY_FILE.write_text(json.dumps(self.hierarchy, indent=4))
             self.modified = False; return True
         except: return False
-    
-    def refresh(self):
-        h, w = self.scr.getmaxyx()
-        self.scr.clear()
+
+    def _draw_item(self, y, x, item, width, selected):
+        t, ci, pi, _ = item
+        if selected: TUI.safe_addstr(self.scr, y, x + 2, ">", curses.color_pair(3) | curses.A_BOLD)
         
-        title_h = 2
-        list_h = min(len(self.items) + 2, h - 6)
-        total_h = title_h + list_h + 2
-        start_y = max(1, (h - total_h) // 2)
+        if t == "ch_title":
+            TUI.safe_addstr(self.scr, y, x + 4, f"Ch {ci+1} Title:", curses.color_pair(1) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, y, x + 18, self._get_value(item)[:width-22], curses.color_pair(4))
+        elif t == "ch_summary":
+            TUI.safe_addstr(self.scr, y, x + 4, "  Summary:", curses.color_pair(4))
+            TUI.safe_addstr(self.scr, y, x + 18, self._get_value(item)[:width-22], curses.color_pair(4))
+        elif t == "pg_id":
+            TUI.safe_addstr(self.scr, y, x + 6, "Page ID:", curses.color_pair(5))
+            TUI.safe_addstr(self.scr, y, x + 18, self._get_value(item)[:width-22], curses.color_pair(4))
+        elif t == "pg_title":
+            TUI.safe_addstr(self.scr, y, x + 6, "  Title:", curses.color_pair(4))
+            TUI.safe_addstr(self.scr, y, x + 18, self._get_value(item)[:width-22], curses.color_pair(4))
+        elif t == "add_page":
+            TUI.safe_addstr(self.scr, y, x + 6, "+ Add page to this chapter...", curses.color_pair(3 if selected else 4) | curses.A_DIM)
+        elif t == "add_chapter":
+            TUI.safe_addstr(self.scr, y, x + 4, "+ Add new chapter...", curses.color_pair(3 if selected else 4) | curses.A_DIM)
+
+    def _draw_footer(self, h, w):
+        footer = "↑↓:Nav  Enter:Edit/Add  d:Delete  s:Save  Esc/q:Back"
+        if self.modified: footer = "* " + footer
+        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+
+    def _handle_input(self, k):
+        if super()._handle_input(k): return True
         
-        safe_addstr(self.scr, start_y, (w - 18) // 2, "HIERARCHY EDITOR", curses.color_pair(1) | curses.A_BOLD)
+        if k in (ord('\n'), 10):
+            item = self.items[self.cursor]; t, ci, pi, _ = item
+            if t == "add_chapter": self._add_chapter()
+            elif t == "add_page": self._add_page(ci)
+            else:
+                curr_val = self.hierarchy[ci].get("summary", "") if t == "ch_summary" else self._get_value(item)
+                new_val = TextEditor(self.scr, initial_text=curr_val, title="Edit Value").run()
+                if new_val is not None: self._set_value(new_val)
+            return True
+        elif k == ord('d'):
+            item = self.items[self.cursor]; t = item[0]
+            if t not in ("add_chapter", "add_page"): self._delete_current()
+            return True
         
-        bw, bx = min(75, w - 4), (w - min(75, w - 4)) // 2
-        draw_box(self.scr, start_y + 2, bx, list_h, bw, "Structure")
-        
-        vis = list_h - 2
-        if self.cursor < self.scroll: self.scroll = self.cursor
-        elif self.cursor >= self.scroll + vis: self.scroll = self.cursor - vis + 1
-        
-        for i in range(vis):
-            idx = self.scroll + i
-            if idx >= len(self.items): break
-            item = self.items[idx]; t, ci, pi, _ = item
-            y = start_y + 3 + i; cur = idx == self.cursor
-            
-            if cur: safe_addstr(self.scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
-            
-            if t == "ch_title":
-                safe_addstr(self.scr, y, bx + 4, f"Ch {ci+1} Title:", curses.color_pair(1) | curses.A_BOLD)
-                safe_addstr(self.scr, y, bx + 18, self._get_value(item)[:bw-22], curses.color_pair(4))
-            elif t == "ch_summary":
-                safe_addstr(self.scr, y, bx + 4, "  Summary:", curses.color_pair(4))
-                safe_addstr(self.scr, y, bx + 18, self._get_value(item)[:bw-22], curses.color_pair(4))
-            elif t == "pg_id":
-                safe_addstr(self.scr, y, bx + 6, "Page ID:", curses.color_pair(5))
-                safe_addstr(self.scr, y, bx + 18, self._get_value(item)[:bw-22], curses.color_pair(4))
-            elif t == "pg_title":
-                safe_addstr(self.scr, y, bx + 6, "  Title:", curses.color_pair(4))
-                safe_addstr(self.scr, y, bx + 18, self._get_value(item)[:bw-22], curses.color_pair(4))
-            elif t == "add_page":
-                safe_addstr(self.scr, y, bx + 6, "+ Add page to this chapter...", curses.color_pair(3 if cur else 4) | curses.A_DIM)
-            elif t == "add_chapter":
-                safe_addstr(self.scr, y, bx + 4, "+ Add new chapter...", curses.color_pair(3 if cur else 4) | curses.A_DIM)
-        
-        footer = "* ↑↓:Nav  Enter:Edit/Add  d:Delete  s:Save  Esc/q:Back" if self.modified else "↑↓:Nav  Enter:Edit/Add  d:Delete  s:Save  Esc/q:Back"
-        safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
-        self.scr.refresh()
-    
-    def run(self):
-        self.refresh()
-        while True:
-            k = self.scr.getch()
-            if k in (ord('q'), 27):
-                if self.modified:
-                    c = prompt_save(self.scr)
-                    if c == 'y': self.save()
-                    elif c == 'c': self.refresh(); continue
-                return
-            elif k in (curses.KEY_UP, ord('k')): self.cursor = max(0, self.cursor - 1)
-            elif k in (curses.KEY_DOWN, ord('j')): self.cursor = min(len(self.items) - 1, self.cursor + 1)
-            elif k in (ord('\n'), 10):
-                item = self.items[self.cursor]; t, ci, pi, _ = item
-                if t == "add_chapter":
-                    self._add_chapter()
-                elif t == "add_page":
-                    self._add_page(ci)
-                else:
-                    curr_val = self.hierarchy[ci].get("summary", "") if t == "ch_summary" else self._get_value(item)
-                    new_val = TextEditor(self.scr, initial_text=curr_val, title="Edit Value").run()
-                    if new_val is not None:
-                        self._set_value(new_val)
-            elif k == ord('d'):
-                item = self.items[self.cursor]; t = item[0]
-                if t not in ("add_chapter", "add_page"):
-                    self._delete_current()
-            elif k == ord('s') and self.save():
-                show_saved(self.scr)
-            self.refresh()
+        return False
 
 
-class SchemeEditor:
-    """Color scheme editor with popup editing"""
+class SchemeEditor(ListEditor):
+    """Color scheme editor"""
     def __init__(self, scr):
-        self.scr = scr
+        super().__init__(scr, "SCHEME EDITOR")
         self.schemes = json.loads(SCHEMES_FILE.read_text())
         self.theme_names = list(self.schemes.keys())
         self.current_theme = 0
-        self.cursor, self.scroll, self.modified = 0, 0, False
         self._build_items()
-        init_colors()
+        self.box_title = "Colors"
+        self.box_width = 70
     
     def _build_items(self):
         theme = self.schemes[self.theme_names[self.current_theme]]
@@ -1213,12 +1175,9 @@ class SchemeEditor:
         elif key.startswith("plot."):
             parts = key.split(".")
             if "plot" not in theme: theme["plot"] = {}
-            # Handle grid-opacity as float
             if parts[1] == "grid-opacity":
-                try:
-                    theme["plot"][parts[1]] = float(val)
-                except:
-                    theme["plot"][parts[1]] = val
+                try: theme["plot"][parts[1]] = float(val)
+                except: theme["plot"][parts[1]] = val
             else:
                 theme["plot"][parts[1]] = val
         else:
@@ -1226,7 +1185,6 @@ class SchemeEditor:
         self.modified = True
     
     def _get_label(self, key):
-        """Get display label for a color key"""
         if key.startswith("block."):
             parts = key.split(".")
             return f"{parts[1]}.{parts[2]}"
@@ -1241,76 +1199,9 @@ class SchemeEditor:
             self.modified = False; return True
         except: return False
     
-    def refresh(self):
-        h, w = self.scr.getmaxyx()
-        self.scr.clear()
-        
-        # Calculate layout - vertically centered
-        title_h = 3  # Title + theme selector
-        list_h = min(len(self.items) + 3, h - 6)
-        total_h = title_h + list_h + 2
-        start_y = max(1, (h - total_h) // 2)
-        
-        # Title
-        safe_addstr(self.scr, start_y, (w - 14) // 2, "SCHEME EDITOR", curses.color_pair(1) | curses.A_BOLD)
-        
-        # Theme selector
-        theme_text = f"< {self.theme_names[self.current_theme]} >"
-        safe_addstr(self.scr, start_y + 1, (w - len(theme_text)) // 2, theme_text, curses.color_pair(5) | curses.A_BOLD)
-        
-        # Two column box
-        bw = min(70, w - 4)
-        bx = (w - bw) // 2
-        left_w = 22  # Key column width
-        
-        draw_box(self.scr, start_y + 3, bx, list_h, bw, "Colors")
-        
-        # Column headers
-        safe_addstr(self.scr, start_y + 4, bx + 4, "Property", curses.color_pair(1) | curses.A_BOLD)
-        safe_addstr(self.scr, start_y + 4, bx + left_w + 2, "Color", curses.color_pair(1) | curses.A_BOLD)
-        
-        # Divider line
-        for i in range(1, list_h - 1):
-            safe_addstr(self.scr, start_y + 3 + i, bx + left_w, "│", curses.color_pair(4) | curses.A_DIM)
-        
-        # Scroll handling
-        vis = list_h - 3  # Account for header row
-        if self.cursor < self.scroll:
-            self.scroll = self.cursor
-        elif self.cursor >= self.scroll + vis:
-            self.scroll = self.cursor - vis + 1
-        
-        # Draw items
-        for i in range(vis):
-            idx = self.scroll + i
-            if idx >= len(self.items):
-                break
-            key, _ = self.items[idx]
-            y = start_y + 5 + i
-            cur = idx == self.cursor
-            
-            if cur:
-                safe_addstr(self.scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
-            
-            # Left column: property name (uniform indentation)
-            label = self._get_label(key)
-            safe_addstr(self.scr, y, bx + 4, label[:left_w - 6], curses.color_pair(5 if cur else 4))
-            
-            # Right column: color swatch + hex value
-            hex_val = self._get_value(key)
-            color = hex_to_curses_color(hex_val)
-            safe_addstr(self.scr, y, bx + left_w + 2, "██", curses.color_pair(color))
-            safe_addstr(self.scr, y, bx + left_w + 5, hex_val[:bw - left_w - 8], curses.color_pair(4))
-        
-        footer = "* ←→:Theme  ↑↓:Nav  Enter:Edit  n:New  d:Del  s:Save  Esc/q:Back" if self.modified else "←→:Theme  ↑↓:Nav  Enter:Edit  n:New  d:Del  s:Save  Esc/q:Back"
-        safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
-        self.scr.refresh()
-    
     def _create_new_scheme(self):
-        # Get new scheme name
         name = TextEditor(self.scr, initial_text="new-scheme", title="New Scheme Name").run()
         if name and name not in self.schemes:
-            # Copy current theme as template
             current = self.schemes[self.theme_names[self.current_theme]]
             self.schemes[name] = copy.deepcopy(current)
             self.theme_names = list(self.schemes.keys())
@@ -1325,74 +1216,121 @@ class SchemeEditor:
             self.current_theme = min(self.current_theme, len(self.theme_names) - 1)
             self._build_items()
             self.modified = True
-    
-    def run(self):
-        self.refresh()
-        while True:
-            k = self.scr.getch()
-            if k in (ord('q'), 27):  # q or Esc
-                if self.modified:
-                    c = prompt_save(self.scr)
-                    if c == 'y': self.save()
-                    elif c == 'c': self.refresh(); continue
-                return
-            elif k == curses.KEY_LEFT:
-                self.current_theme = (self.current_theme - 1) % len(self.theme_names)
-                self._build_items(); self.cursor = min(self.cursor, len(self.items) - 1)
-            elif k == curses.KEY_RIGHT:
-                self.current_theme = (self.current_theme + 1) % len(self.theme_names)
-                self._build_items(); self.cursor = min(self.cursor, len(self.items) - 1)
-            elif k in (curses.KEY_UP, ord('k')): self.cursor = max(0, self.cursor - 1)
-            elif k in (curses.KEY_DOWN, ord('j')): self.cursor = min(len(self.items) - 1, self.cursor + 1)
-            elif k in (ord('\n'), 10):
-                key, _ = self.items[self.cursor]
-                curr_val = self._get_value(key)
-                new_val = TextEditor(self.scr, initial_text=curr_val, title="Edit Color").run()
-                if new_val is not None:
-                    self._set_value(key, new_val)
-                    self._build_items()
-            elif k == ord('n'):
-                self._create_new_scheme()
-            elif k == ord('d'):
-                self._delete_current_scheme()
-            elif k == ord('s') and self.save():
-                show_saved(self.scr)
-            self.refresh()
+
+    def refresh(self):
+        # Override refresh to add theme selector and headers
+        h, w = self.scr.getmaxyx()
+        self.scr.clear()
+        
+        list_h = min(len(self.items) + 3, h - 6)
+        total_h = 3 + list_h + 2
+        start_y = max(1, (h - total_h) // 2)
+        
+        TUI.safe_addstr(self.scr, start_y, (w - 14) // 2, self.title, curses.color_pair(1) | curses.A_BOLD)
+        
+        theme_text = f"< {self.theme_names[self.current_theme]} >"
+        TUI.safe_addstr(self.scr, start_y + 1, (w - len(theme_text)) // 2, theme_text, curses.color_pair(5) | curses.A_BOLD)
+        
+        bw = min(self.box_width, w - 4)
+        bx = (w - bw) // 2
+        left_w = 22
+        
+        TUI.draw_box(self.scr, start_y + 3, bx, list_h, bw, self.box_title)
+        
+        TUI.safe_addstr(self.scr, start_y + 4, bx + 4, "Property", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, start_y + 4, bx + left_w + 2, "Color", curses.color_pair(1) | curses.A_BOLD)
+        
+        for i in range(1, list_h - 1):
+            TUI.safe_addstr(self.scr, start_y + 3 + i, bx + left_w, "│", curses.color_pair(4) | curses.A_DIM)
+        
+        vis = list_h - 3
+        if self.cursor < self.scroll: self.scroll = self.cursor
+        elif self.cursor >= self.scroll + vis: self.scroll = self.cursor - vis + 1
+        
+        for i in range(vis):
+            idx = self.scroll + i
+            if idx >= len(self.items): break
+            y = start_y + 5 + i
+            self._draw_item(y, bx, self.items[idx], bw, idx == self.cursor)
+            
+        self._draw_footer(h, w)
+        self.scr.refresh()
+
+    def _draw_item(self, y, x, item, width, selected):
+        key, _ = item
+        left_w = 22
+        
+        if selected: TUI.safe_addstr(self.scr, y, x + 2, ">", curses.color_pair(3) | curses.A_BOLD)
+        
+        label = self._get_label(key)
+        TUI.safe_addstr(self.scr, y, x + 4, label[:left_w - 6], curses.color_pair(5 if selected else 4))
+        
+        hex_val = self._get_value(key)
+        color = hex_to_curses_color(hex_val)
+        TUI.safe_addstr(self.scr, y, x + left_w + 2, "██", curses.color_pair(color))
+        TUI.safe_addstr(self.scr, y, x + left_w + 5, hex_val[:width - left_w - 8], curses.color_pair(4))
+
+    def _draw_footer(self, h, w):
+        footer = "←→:Theme  ↑↓:Nav  Enter:Edit  n:New  d:Del  s:Save  Esc/q:Back"
+        if self.modified: footer = "* " + footer
+        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+
+    def _handle_input(self, k):
+        if super()._handle_input(k): return True
+        
+        if k == curses.KEY_LEFT:
+            self.current_theme = (self.current_theme - 1) % len(self.theme_names)
+            self._build_items(); self.cursor = min(self.cursor, len(self.items) - 1)
+            return True
+        elif k == curses.KEY_RIGHT:
+            self.current_theme = (self.current_theme + 1) % len(self.theme_names)
+            self._build_items(); self.cursor = min(self.cursor, len(self.items) - 1)
+            return True
+        elif k in (ord('\n'), 10):
+            key, _ = self.items[self.cursor]
+            curr_val = self._get_value(key)
+            new_val = TextEditor(self.scr, initial_text=curr_val, title="Edit Color").run()
+            if new_val is not None:
+                self._set_value(key, new_val)
+                self._build_items()
+            return True
+        elif k == ord('n'): self._create_new_scheme(); return True
+        elif k == ord('d'): self._delete_current_scheme(); return True
+        
+        return False
 
 
-class SnippetsEditor:
-    """Two-column snippet editor with name on left, definition on right"""
+class SnippetsEditor(ListEditor):
+    """Two-column snippet editor"""
     def __init__(self, scr):
-        self.scr = scr
-        self.cursor, self.scroll, self.modified = 0, 0, False
+        super().__init__(scr, "SNIPPETS EDITOR")
         self._load_snippets()
-        init_colors()
+        self.box_title = "Snippets"
+        self.box_width = 80
     
     def _load_snippets(self):
-        """Parse snippets.typ file into list of (name, definition) tuples"""
         self.snippets = []
         try:
             content = SNIPPETS_FILE.read_text()
             for line in content.split('\n'):
                 line = line.strip()
                 if line.startswith('#let ') and '=' in line:
-                    # Parse: #let name = definition
-                    rest = line[5:]  # Remove '#let '
+                    rest = line[5:]
                     eq_pos = rest.find('=')
                     if eq_pos != -1:
                         name = rest[:eq_pos].strip()
-                        # Handle function definitions like sq(k)
                         if '(' in name:
                             name = name[:name.find('(') + 1] + name[name.find('(') + 1:name.find(')') + 1]
                         definition = rest[eq_pos + 1:].strip()
                         self.snippets.append([name, definition])
-        except:
-            pass
-        if not self.snippets:
-            self.snippets = [["example", "[example text]"]]
-    
+        except: pass
+        if not self.snippets: self.snippets = [["example", "[example text]"]]
+        self._update_items()
+
+    def _update_items(self):
+        self.items = self.snippets + [["+ Add new snippet...", ""]]
+
     def _save_snippets(self):
-        """Write snippets back to file"""
         lines = []
         for name, definition in self.snippets:
             lines.append(f"#let {name} = {definition}")
@@ -1400,127 +1338,104 @@ class SnippetsEditor:
         self.modified = False
     
     def save(self):
-        try:
-            self._save_snippets()
-            return True
-        except:
-            return False
-    
+        try: self._save_snippets(); return True
+        except: return False
+
+    def _draw_item(self, y, x, item, width, selected):
+        name, definition = item
+        left_w = 20
+        
+        if selected: TUI.safe_addstr(self.scr, y, x + 2, ">", curses.color_pair(3) | curses.A_BOLD)
+        
+        if name == "+ Add new snippet...":
+            TUI.safe_addstr(self.scr, y, x + 4, name, curses.color_pair(3 if selected else 4) | curses.A_DIM)
+        else:
+            TUI.safe_addstr(self.scr, y, x + 4, name[:left_w - 6], curses.color_pair(5 if selected else 4))
+            TUI.safe_addstr(self.scr, y, x + left_w + 2, definition[:width - left_w - 6], curses.color_pair(4))
+
     def refresh(self):
+        # Override refresh to add headers
         h, w = self.scr.getmaxyx()
         self.scr.clear()
         
-        # Calculate layout - vertically centered
-        title_h = 2
-        list_h = min(len(self.snippets) + 2, h - 6)
-        total_h = title_h + list_h + 2
+        list_h = min(len(self.items) + 2, h - 6)
+        total_h = 2 + list_h + 2
         start_y = max(1, (h - total_h) // 2)
         
-        # Title
-        safe_addstr(self.scr, start_y, (w - 16) // 2, "SNIPPETS EDITOR", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, start_y, (w - 16) // 2, self.title, curses.color_pair(1) | curses.A_BOLD)
         
-        # Two column box
-        bw = min(80, w - 4)
+        bw = min(self.box_width, w - 4)
         bx = (w - bw) // 2
-        left_w = 20  # Name column width
+        left_w = 20
         
-        draw_box(self.scr, start_y + 2, bx, list_h, bw, "Snippets")
+        TUI.draw_box(self.scr, start_y + 2, bx, list_h, bw, self.box_title)
         
-        # Column headers
-        safe_addstr(self.scr, start_y + 3, bx + 4, "Name", curses.color_pair(1) | curses.A_BOLD)
-        safe_addstr(self.scr, start_y + 3, bx + left_w + 2, "Definition", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, start_y + 3, bx + 4, "Name", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, start_y + 3, bx + left_w + 2, "Definition", curses.color_pair(1) | curses.A_BOLD)
         
-        # Divider line
         for i in range(1, list_h - 1):
-            safe_addstr(self.scr, start_y + 2 + i, bx + left_w, "│", curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(self.scr, start_y + 2 + i, bx + left_w, "│", curses.color_pair(4) | curses.A_DIM)
         
-        # Scroll handling - include +1 for the "add new" row
-        total_items = len(self.snippets) + 1
-        vis = list_h - 3  # Account for header row
-        if self.cursor < self.scroll:
-            self.scroll = self.cursor
-        elif self.cursor >= self.scroll + vis:
-            self.scroll = self.cursor - vis + 1
+        vis = list_h - 3
+        if self.cursor < self.scroll: self.scroll = self.cursor
+        elif self.cursor >= self.scroll + vis: self.scroll = self.cursor - vis + 1
         
-        # Draw items
         for i in range(vis):
             idx = self.scroll + i
-            if idx >= total_items:
-                break
+            if idx >= len(self.items): break
             y = start_y + 4 + i
-            cur = idx == self.cursor
+            self._draw_item(y, bx, self.items[idx], bw, idx == self.cursor)
             
-            if cur:
-                safe_addstr(self.scr, y, bx + 2, ">", curses.color_pair(3) | curses.A_BOLD)
-            
-            if idx < len(self.snippets):
-                # Regular snippet row
-                name, definition = self.snippets[idx]
-                safe_addstr(self.scr, y, bx + 4, name[:left_w - 6], curses.color_pair(5 if cur else 4))
-                def_text = definition[:bw - left_w - 6]
-                safe_addstr(self.scr, y, bx + left_w + 2, def_text, curses.color_pair(4))
-            else:
-                # "Add new" row
-                safe_addstr(self.scr, y, bx + 4, "+ Add new snippet...", curses.color_pair(3 if cur else 4) | curses.A_DIM)
-        
-        footer = "* ↑↓:Nav  Enter:Edit/Add  d:Delete  s:Save  Esc/q:Back" if self.modified else "↑↓:Nav  Enter:Edit/Add  d:Delete  s:Save  Esc/q:Back"
-        safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        self._draw_footer(h, w)
         self.scr.refresh()
-    
-    def run(self):
-        self.refresh()
-        while True:
-            k = self.scr.getch()
-            total_items = len(self.snippets) + 1  # Include "add new" row
-            
-            if k in (ord('q'), 27):  # q or Esc
-                if self.modified:
-                    c = prompt_save(self.scr)
-                    if c == 'y': self.save()
-                    elif c == 'c': self.refresh(); continue
-                return
-            elif k in (curses.KEY_UP, ord('k')):
-                self.cursor = max(0, self.cursor - 1)
-            elif k in (curses.KEY_DOWN, ord('j')):
-                self.cursor = min(total_items - 1, self.cursor + 1)
-            elif k in (ord('\n'), 10):
-                if self.cursor >= len(self.snippets):
-                    # "Add new" row selected - create new snippet
-                    self.snippets.append(["new_snippet", "[definition]"])
-                    self.cursor = len(self.snippets) - 1
-                    self.modified = True
-                    # Immediately edit the new snippet
-                    name, definition = self.snippets[self.cursor]
-                    new_name = TextEditor(self.scr, initial_text=name, title="New Snippet Name").run()
-                    if new_name is not None:
-                        self.snippets[self.cursor][0] = new_name
-                    new_def = TextEditor(self.scr, initial_text=definition, title="New Definition").run()
-                    if new_def is not None:
-                        self.snippets[self.cursor][1] = new_def
-                elif self.snippets:
-                    name, definition = self.snippets[self.cursor]
-                    # Edit name
-                    new_name = TextEditor(self.scr, initial_text=name, title="Edit Snippet Name").run()
-                    if new_name is not None:
-                        self.snippets[self.cursor][0] = new_name
-                        self.modified = True
-                    # Edit definition
-                    new_def = TextEditor(self.scr, initial_text=definition, title="Edit Definition").run()
-                    if new_def is not None:
-                        self.snippets[self.cursor][1] = new_def
-                        self.modified = True
-            elif k == ord('n'):  # New snippet (shortcut)
+
+    def _draw_footer(self, h, w):
+        footer = "↑↓:Nav  Enter:Edit/Add  d:Delete  s:Save  Esc/q:Back"
+        if self.modified: footer = "* " + footer
+        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+
+    def _handle_input(self, k):
+        if super()._handle_input(k): return True
+        
+        if k in (ord('\n'), 10):
+            if self.cursor >= len(self.snippets):
+                # Add new
                 self.snippets.append(["new_snippet", "[definition]"])
                 self.cursor = len(self.snippets) - 1
                 self.modified = True
-            elif k == ord('d') and self.cursor < len(self.snippets) and self.snippets:  # Delete (not on "add" row)
-                del self.snippets[self.cursor]
-                if self.cursor >= len(self.snippets):
-                    self.cursor = max(0, len(self.snippets) - 1)
-                self.modified = True
-            elif k == ord('s') and self.save():
-                show_saved(self.scr)
-            self.refresh()
+                self._update_items()
+                # Edit immediately
+                name, definition = self.snippets[self.cursor]
+                new_name = TextEditor(self.scr, initial_text=name, title="New Snippet Name").run()
+                if new_name is not None: self.snippets[self.cursor][0] = new_name
+                new_def = TextEditor(self.scr, initial_text=definition, title="New Definition").run()
+                if new_def is not None: self.snippets[self.cursor][1] = new_def
+            else:
+                # Edit existing
+                name, definition = self.snippets[self.cursor]
+                new_name = TextEditor(self.scr, initial_text=name, title="Edit Snippet Name").run()
+                if new_name is not None:
+                    self.snippets[self.cursor][0] = new_name
+                    self.modified = True
+                new_def = TextEditor(self.scr, initial_text=definition, title="Edit Definition").run()
+                if new_def is not None:
+                    self.snippets[self.cursor][1] = new_def
+                    self.modified = True
+            return True
+        elif k == ord('n'):
+            self.snippets.append(["new_snippet", "[definition]"])
+            self.cursor = len(self.snippets) - 1
+            self.modified = True
+            self._update_items()
+            return True
+        elif k == ord('d') and self.cursor < len(self.snippets) and self.snippets:
+            del self.snippets[self.cursor]
+            if self.cursor >= len(self.snippets): self.cursor = max(0, len(self.snippets) - 1)
+            self.modified = True
+            self._update_items()
+            return True
+        
+        return False
 
 
 # =============================================================================
@@ -1534,7 +1449,7 @@ class BuildUI:
         self.task, self.phase, self.progress, self.total = "", "", 0, 0
         self.view, self.scroll = "normal", 0
         self.has_warnings = False
-        init_colors()
+        TUI.init_colors()
         self.h, self.w = scr.getmaxyx()
     
     def log(self, msg, ok=False): self.logs.append((msg, ok)); self.logs = self.logs[-20:]; self.refresh()
@@ -1577,31 +1492,31 @@ class BuildUI:
         start_y = max(0, (self.h - total_h) // 2)
         
         title = "NOTEWORTHY BUILD SYSTEM" + (" [DEBUG]" if self.debug_mode else "")
-        safe_addstr(self.scr, start_y, (self.w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, start_y, (self.w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
         
         bw, bx = min(60, self.w - 4), (self.w - min(60, self.w - 4)) // 2
-        draw_box(self.scr, start_y + 2, bx, 5, bw, "Progress")
-        if self.phase: safe_addstr(self.scr, start_y + 3, bx + 2, self.phase[:bw-4], curses.color_pair(5))
-        if self.task: safe_addstr(self.scr, start_y + 4, bx + 2, f"→ {self.task}"[:bw-4], curses.color_pair(4))
+        TUI.draw_box(self.scr, start_y + 2, bx, 5, bw, "Progress")
+        if self.phase: TUI.safe_addstr(self.scr, start_y + 3, bx + 2, self.phase[:bw-4], curses.color_pair(5))
+        if self.task: TUI.safe_addstr(self.scr, start_y + 4, bx + 2, f"→ {self.task}"[:bw-4], curses.color_pair(4))
         if self.total:
             filled = int((bw - 12) * self.progress / self.total)
-            safe_addstr(self.scr, start_y + 5, bx + 2, "█" * filled + "░" * (bw - 12 - filled), curses.color_pair(3))
-            safe_addstr(self.scr, start_y + 5, bx + bw - 8, f"{100*self.progress//self.total:3d}%", curses.color_pair(3) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, start_y + 5, bx + 2, "█" * filled + "░" * (bw - 12 - filled), curses.color_pair(3))
+            TUI.safe_addstr(self.scr, start_y + 5, bx + bw - 8, f"{100*self.progress//self.total:3d}%", curses.color_pair(3) | curses.A_BOLD)
         
         if self.view == "typst":
-            draw_box(self.scr, start_y + 8, bx, lh, bw, "Typst Output (↑↓ scroll)")
+            TUI.draw_box(self.scr, start_y + 8, bx, lh, bw, "Typst Output (↑↓ scroll)")
             if self.typst_logs:
                 for i, line in enumerate(self.typst_logs[self.scroll:self.scroll + lh - 2]):
                     c = 6 if 'error:' in line.lower() else 3 if 'warning:' in line.lower() else 4
-                    safe_addstr(self.scr, start_y + 9 + i, bx + 2, line[:bw-4], curses.color_pair(c))
+                    TUI.safe_addstr(self.scr, start_y + 9 + i, bx + 2, line[:bw-4], curses.color_pair(c))
             else:
-                safe_addstr(self.scr, start_y + 9, bx + 2, "(no output yet)", curses.color_pair(4) | curses.A_DIM)
+                TUI.safe_addstr(self.scr, start_y + 9, bx + 2, "(no output yet)", curses.color_pair(4) | curses.A_DIM)
         else:
-            draw_box(self.scr, start_y + 8, bx, lh, bw, "Build Log")
+            TUI.draw_box(self.scr, start_y + 8, bx, lh, bw, "Build Log")
             for i, (msg, ok) in enumerate(self.logs[-(lh-2):]):
-                safe_addstr(self.scr, start_y + 9 + i, bx + 2, ("✓ " if ok else "  ") + msg[:bw-6], curses.color_pair(2 if ok else 4))
+                TUI.safe_addstr(self.scr, start_y + 9 + i, bx + 2, ("✓ " if ok else "  ") + msg[:bw-6], curses.color_pair(2 if ok else 4))
         
-        safe_addstr(self.scr, self.h - 1, (self.w - 50) // 2, "Press Ctrl+C to cancel  |  Press 'v' to toggle view", curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(self.scr, self.h - 1, (self.w - 50) // 2, "Press Ctrl+C to cancel  |  Press 'v' to toggle view", curses.color_pair(4) | curses.A_DIM)
         self.scr.refresh()
 
 # =============================================================================
@@ -1741,7 +1656,7 @@ class InitWizard:
         ]
         self.current_step = 0
         self.choice_index = 0  # For choice type slider
-        init_colors()
+        TUI.init_colors()
     
     def refresh(self):
         h, w = self.scr.getmaxyx()
@@ -1750,39 +1665,39 @@ class InitWizard:
         total_h = 16
         start_y = max(1, (h - total_h) // 2)
         
-        safe_addstr(self.scr, start_y, (w - 22) // 2, "NOTEWORTHY SETUP WIZARD", curses.color_pair(1) | curses.A_BOLD)
-        safe_addstr(self.scr, start_y + 1, (w - 40) // 2, "Let's set up your document configuration", curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(self.scr, start_y, (w - 22) // 2, "NOTEWORTHY SETUP WIZARD", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, start_y + 1, (w - 40) // 2, "Let's set up your document configuration", curses.color_pair(4) | curses.A_DIM)
         
         prog = f"Step {self.current_step + 1} of {len(self.steps)}"
-        safe_addstr(self.scr, start_y + 3, (w - len(prog)) // 2, prog, curses.color_pair(5))
+        TUI.safe_addstr(self.scr, start_y + 3, (w - len(prog)) // 2, prog, curses.color_pair(5))
         
         step = self.steps[self.current_step]
         key, label, prompt, stype = step[0], step[1], step[2], step[3]
         
         bw = min(60, w - 4)
         bx = (w - bw) // 2
-        draw_box(self.scr, start_y + 5, bx, 7, bw, label)
+        TUI.draw_box(self.scr, start_y + 5, bx, 7, bw, label)
         
-        safe_addstr(self.scr, start_y + 6, bx + 2, prompt[:bw-4], curses.color_pair(4))
+        TUI.safe_addstr(self.scr, start_y + 6, bx + 2, prompt[:bw-4], curses.color_pair(4))
         
         if stype == "choice":
             # Show slider selector
             choices = step[4]
             choice_text = f"◀  {choices[self.choice_index]}  ▶"
-            safe_addstr(self.scr, start_y + 8, (w - len(choice_text)) // 2, choice_text, curses.color_pair(5) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, start_y + 8, (w - len(choice_text)) // 2, choice_text, curses.color_pair(5) | curses.A_BOLD)
             # Show dots for position
             dots = "".join("●" if i == self.choice_index else "○" for i in range(len(choices)))
-            safe_addstr(self.scr, start_y + 9, (w - len(dots)) // 2, dots, curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(self.scr, start_y + 9, (w - len(dots)) // 2, dots, curses.color_pair(4) | curses.A_DIM)
             footer = "←→:Select  Enter:Confirm  Backspace:Back  Esc:Cancel"
         else:
             curr_val = self.config.get(key, "")
             if isinstance(curr_val, list):
                 curr_val = ", ".join(curr_val)
             if curr_val:
-                safe_addstr(self.scr, start_y + 8, bx + 2, f"Default: {str(curr_val)[:bw-12]}", curses.color_pair(4) | curses.A_DIM)
+                TUI.safe_addstr(self.scr, start_y + 8, bx + 2, f"Default: {str(curr_val)[:bw-12]}", curses.color_pair(4) | curses.A_DIM)
             footer = "Enter:Input  Backspace:Back  Esc:Cancel"
         
-        safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
         self.scr.refresh()
     
     def get_input(self):
@@ -1794,7 +1709,7 @@ class InitWizard:
         bx = (w - bw) // 2
         start_y = max(1, (h - 16) // 2)
         
-        safe_addstr(self.scr, start_y + 10, bx + 2, "> ", curses.color_pair(3) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, start_y + 10, bx + 2, "> ", curses.color_pair(3) | curses.A_BOLD)
         self.scr.refresh()
         
         try:
@@ -1843,7 +1758,7 @@ class InitWizard:
                     self.current_step += 1
                 elif not value and key == "title":
                     h, w = self.scr.getmaxyx()
-                    safe_addstr(self.scr, h - 2, (w - 20) // 2, "Title is required!", curses.color_pair(6) | curses.A_BOLD)
+                    TUI.safe_addstr(self.scr, h - 2, (w - 20) // 2, "Title is required!", curses.color_pair(6) | curses.A_BOLD)
                     self.scr.refresh()
                     curses.napms(1000)
         
@@ -1862,8 +1777,8 @@ def needs_init():
 # =============================================================================
 
 def run_app(scr, args):
-    init_colors()
-    if not check_terminal_size(scr): return
+    TUI.init_colors()
+    if not TUI.check_terminal_size(scr): return
     
     # Check if we need to run the init wizard
     if needs_init():
@@ -1873,7 +1788,7 @@ def run_app(scr, args):
     
     scr.clear()
     h, w = scr.getmaxyx()
-    safe_addstr(scr, h // 2, (w - 11) // 2, "Indexing...", curses.color_pair(1) | curses.A_BOLD)
+    TUI.safe_addstr(scr, h // 2, (w - 11) // 2, "Indexing...", curses.color_pair(1) | curses.A_BOLD)
     scr.refresh()
     
     hierarchy = extract_hierarchy()
