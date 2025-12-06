@@ -26,6 +26,15 @@ Say hi to **Noteworthy**, an academic parser and framework for creating massive 
 
 An example project is available at https://github.com/sihooleebd/math-noteworthy. 
 
+## Gallery
+
+<p align="center">
+  <img src="images/example-01.png" width="45%" alt="Cover Page"/>
+  <img src="images/example-02.png" width="45%" alt="Table of Contents"/>
+  <img src="images/example-03.png" width="45%" alt="Content Page"/>
+  <img src="images/example-04.png" width="45%" alt="Another Content Page"/>
+</p>
+
 ### Framework Components
 
 - **Theme System**: 13+ pre-built color schemes with easy customization
@@ -82,6 +91,10 @@ python3 noteworthy.py
 
 The noteworthy system guides you through the initialization, the configuration, and the build. Upon first run, the template will load the necessary template files. 
 
+<p align="center">
+  <img src="images/wizard_demo.gif" width="70%" alt="Setup Wizard Demo"/>
+</p>
+
 **TUI Features:**
 - **Chapter Selection**: Toggle individual chapters/sections to compile
 - **Options**:
@@ -99,6 +112,30 @@ The noteworthy system guides you through the initialization, the configuration, 
 - **Controls**: Arrow keys to navigate, Space to toggle, Enter to build, `q` to quit
 - **Build Progress**: Real-time compilation status with Typst log toggle (`v`)
 - **Template Integrity Check**: Verify that the template files are not corrupted and auto fix
+
+#### Interface Preview
+
+<p align="center">
+  <strong>Main Menu & Editor Selection</strong><br>
+  <img src="images/main.png" width="45%" />
+  <img src="images/editor-select.png" width="45%" />
+</p>
+
+<p align="center">
+  <strong>Editors</strong><br>
+  <img src="images/hierarchy.png" width="45%" />
+  <img src="images/scheme.png" width="45%" />
+</p>
+
+<p align="center">
+  <img src="images/config.png" width="45%" />
+  <img src="images/snippets.png" width="45%" />
+</p>
+
+<p align="center">
+  <strong>Build Process</strong><br>
+  <img src="images/building.png" width="80%" />
+</p>
 
 ### Single File Compilation
 
