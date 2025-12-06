@@ -19,6 +19,9 @@ from pathlib import Path
 
 import logging
 
+# Reduce Esc key delay (must be set before curses.initscr)
+os.environ.setdefault('ESCDELAY', '25')
+
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -43,7 +46,7 @@ SCHEMES_FILE = BASE_DIR / "templates/config/schemes.json"
 SETUP_FILE = BASE_DIR / "templates/setup.typ"
 
 # Terminal Size Requirements
-MIN_TERM_HEIGHT = 22 # Increased for margins
+MIN_TERM_HEIGHT = 30 # Increased for margins
 MIN_TERM_WIDTH = 52
 
 # ASCII Art
@@ -889,6 +892,7 @@ def show_editor_menu(scr):
     ]
     
     while True:
+        if not TUI.check_terminal_size(scr): return
         h_raw, w_raw = scr.getmaxyx()
         h, w = h_raw - 2, w_raw - 2
         scr.clear()
@@ -896,7 +900,7 @@ def show_editor_menu(scr):
         layout = "vert"
         # Use horizontal layout only if vertical space is tight but we have width
         # Vertical needs: Logo(15) + Title(2) + Menu(8) + Footer(1) + Spacing(4) ~= 30 lines
-        min_vert_height = len(LOGO) + len(options) + 8
+        min_vert_height = len(LOGO) + len(options) + 10
         if h < min_vert_height and w > 80: 
             layout = "horz"
         
@@ -2220,12 +2224,19 @@ class InitWizard:
         curses.echo()
         curses.curs_set(1)
         
-        # Use stored input position from refresh() for correct layout
-        TUI.safe_addstr(self.scr, self.input_y, self.input_x, "> ", curses.color_pair(3) | curses.A_BOLD)
-        self.scr.refresh()
+        # Ensure we are using the latest calculated position
+        y, x = self.input_y, self.input_x
         
+        # Clear the input area first to prevent ghosting
         try:
-            value = self.scr.getstr(self.input_y, self.input_x + 2, self.input_w - 4).decode('utf-8').strip()
+            self.scr.move(y, x)
+            self.scr.clrtoeol()
+            TUI.safe_addstr(self.scr, y, x, "> ", curses.color_pair(3) | curses.A_BOLD)
+            self.scr.refresh()
+            
+            # Explicitly move cursor to input start position for getstr
+            # Note: getstr(y, x, n) reads from (y,x), so we must pass the shifted coordinate
+            value = self.scr.getstr(y, x + 2, self.input_w - 4).decode('utf-8').strip()
         except:
             value = ""
         
@@ -2234,6 +2245,27 @@ class InitWizard:
         return value
     
     def run(self):
+        # Welcome Screen
+        while True:
+            if not TUI.check_terminal_size(self.scr): return None
+            h, w = self.scr.getmaxyx()
+            self.scr.clear()
+            
+            bh, bw = 8, min(60, w - 4)
+            bx, by = (w - bw) // 2, (h - bh) // 2
+            
+            TUI.draw_box(self.scr, by, bx, bh, bw, " Welcome ")
+            TUI.safe_addstr(self.scr, by + 2, bx + 2, "welcome to noteworthy!", curses.color_pair(1) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, by + 3, bx + 2, "We will guide you to initializing your project.", curses.color_pair(4))
+            
+            footer = "Press Enter to begin..."
+            TUI.safe_addstr(self.scr, by + 6, bx + (bw - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+            
+            self.scr.refresh()
+            k = self.scr.getch()
+            if k == 27: return None
+            if k in (ord('\n'), 10, curses.KEY_ENTER): break
+            
         while self.current_step < len(self.steps):
             if not TUI.check_terminal_size(self.scr): return None
             self.refresh()
@@ -2598,8 +2630,10 @@ class MainMenu:
             
             lh = len(LOGO)
             layout = "vert" 
-            # Need: logo + title(2) + gap(2) + buttons(5) + labels(1) + gap(1) + footer(1) + margin(2) = lh + 14
-            if h < lh + 14 and w > 80: layout = "horz"
+            # Need: logo(16) + title(2) + gap(2) + buttons(5) + labels(1) + margin(2) ~ 28 lines
+            # With footer at h-3, valid height is h-4.
+            # If h < 34, switch to horizontal to be safe.
+            if h < lh + 18 and w > 80: layout = "horz"
             
             if layout == "vert":
                 # Vertical Layout (Centered)
@@ -2642,14 +2676,17 @@ class MainMenu:
                     style = curses.color_pair(2) | curses.A_BOLD if i == self.selected else curses.color_pair(4)
                     TUI.draw_box(self.scr, by, btn_x, 5, btn_w, "")
                     TUI.safe_addstr(self.scr, by + 2, btn_x + (btn_w - len(label)) // 2, label, style)
-                    TUI.safe_addstr(self.scr, by + 2, btn_x + btn_w + 2, f"({key.upper()}) - {desc}", curses.color_pair(4) | curses.A_DIM)
+                    TUI.safe_addstr(self.scr, by + 2, btn_x + btn_w + 2, f"({key.upper()})", curses.color_pair(4) | curses.A_DIM)
 
-            # Footer - position after buttons
+            # Responsive adjustments
+            footer = "Arrows: Select  Enter: Confirm  Esc: Quit"
             if layout == "vert":
                 footer_y = btn_y + 7
-            else:
-                footer_y = btn_start_y + 13
-            TUI.safe_addstr(self.scr, h - 3, (w - 30) // 2, "Arrows: Select  Enter: Confirm  Esc: Quit", curses.color_pair(4) | curses.A_DIM)
+                # If content pushes into footer area, shift up or hide logo text
+                if footer_y > h - 4:
+                    start_y = max(0, start_y - (footer_y - (h - 4)))
+            
+            TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
             
             self.scr.refresh()
             
