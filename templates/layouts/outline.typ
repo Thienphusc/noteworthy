@@ -6,7 +6,7 @@
   // Get page map from input if available
   let page-map-str = sys.inputs.at("page-map", default: none)
   let page-map-file = sys.inputs.at("page-map-file", default: none)
-  
+
   let page-map = if page-map-str != none {
     // Parse JSON using bytes
     json(bytes(page-map-str))
@@ -38,9 +38,9 @@
     #v(1.5cm)
 
     // Read directly from hierarchy in config.typ
-    #for chapter-entry in hierarchy {
-      let first-page = chapter-entry.pages.at(0)
-      let chap-id = first-page.id.slice(0, 2)
+    #for (i, chapter-entry) in hierarchy.enumerate() {
+      // Fixed: use format-chapter-id with index
+      let chap-id = format-chapter-id(str(i + 1), hierarchy.len())
 
       block(breakable: false)[
         #text(
@@ -72,15 +72,20 @@
         row-gutter: 0.8em,
         column-gutter: 1.5em,
 
-        ..for page-entry in chapter-entry.pages {
-          let page-num = if page-map != (:) and page-entry.id in page-map {
-            str(page-map.at(page-entry.id))
+        ..for (j, page-entry) in chapter-entry.pages.enumerate() {
+          // Fixed: use index-based keys for page-map
+          let page-key = str(i) + "/" + str(j)
+          let page-num = if page-map != (:) and page-key in page-map {
+            str(page-map.at(page-key))
           } else {
             "—"
           }
 
+          // Added: use format-page-id for display
+          let page-display-id = format-page-id(str(j + 1), chapter-entry.pages.len(), hierarchy.len())
+
           (
-            text(fill: theme.text-muted, font: font, weight: "medium")[#subchap-name #page-entry.id],
+            text(fill: theme.text-muted, font: font, weight: "medium")[#subchap-name #page-display-id],
             box(width: 100%)[
               #text(font: font, fill: theme.text-main)[#page-entry.title]
               #box(width: 1fr, repeat[#text(fill: theme.text-muted.transparentize(70%))[. ]])
@@ -94,3 +99,4 @@
     }
   ]
 }
+

@@ -21,11 +21,10 @@
   // Optional stylin
   set text(font: font, size: 11pt, fill: theme.text-main)
   context {
-    let chapter = query(selector(metadata).before(here()))
-      .filter(el => {
-        el.label != none and str(el.label).starts-with("chapter-") and str(el.label).len() == 10
-      })
-      .last()
+    let chapters = query(selector(metadata).before(here())).filter(el => {
+      el.label != none and str(el.label).starts-with("chapter-")
+    })
+    let chapter = if chapters.len() > 0 { chapters.last() } else { none }
 
     [#metadata((number, title, chapter)) #label(page-id)]
 
@@ -69,3 +68,4 @@
 
   body
 }
+

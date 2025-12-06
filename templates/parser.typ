@@ -30,31 +30,37 @@
   }
 }
 
-#for chapter in hierarchy {
-  let first-page = chapter.pages.at(0)
-  let chapter-id = first-page.id.slice(0, 2)
+#for (i, chapter) in hierarchy.enumerate() {
+  let chapter-idx = str(i)
+  let chapter-display-id = format-chapter-id(str(i + 1), hierarchy.len())
+  let total-pages = chapter.pages.len()
 
-  if target == none or target == "chapter-" + chapter-id {
+  if target == none or target == "chapter-" + chapter-idx {
     if display-chap-cover {
       chapter-cover(
-        number: "Chapter " + chapter-id,
+        number: chapter-name + " " + chapter-display-id,
         title: chapter.title,
         summary: chapter.summary,
       )
     }
   }
 
-  for page in chapter.pages {
-    if target == none or target == page.id {
+  for (j, page) in chapter.pages.enumerate() {
+    let page-idx = str(j)
+    let page-target = chapter-idx + "/" + page-idx
+    let page-display-id = format-page-id(str(j + 1), total-pages, hierarchy.len())
+
+    if target == none or target == page-target {
       // Inject chapter metadata if missing (for single page compilation)
-      if target != none and target != "chapter-" + chapter-id {
-        [#metadata(("Chapter " + chapter-id, chapter.title)) #label("chapter-" + chapter-id)]
+      if target != none and target != "chapter-" + chapter-idx {
+        [#metadata((chapter-name + " " + chapter-display-id, chapter.title)) #label("chapter-" + str(i + 1))]
       }
       show: project.with(
-        number: subchap-name + " " + page.id,
+        number: subchap-name + " " + page-display-id,
         title: page.title,
       )
-      include "../content/" + lower(chapter-name) + " " + chapter-id + "/" + page.id + ".typ"
+      include "../content/" + chapter-idx + "/" + page-idx + ".typ"
     }
   }
 }
+
