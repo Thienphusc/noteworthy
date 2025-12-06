@@ -134,6 +134,7 @@ The noteworthy system guides you through the initialization, the configuration, 
 
 <p align="center">
   <strong>Build Process</strong><br>
+  <img src="images/build.png" width="80%" />
   <img src="images/building.png" width="80%" />
 </p>
 
