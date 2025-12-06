@@ -24,6 +24,7 @@
 #let box-margin = eval(config.box-margin)
 #let box-inset = eval(config.box-inset)
 #let render-sample-count = config.render-sample-count
+#let render-implicit-count = config.render-implicit-count
 #let display-mode = config.display-mode
 #let hierarchy = json("config/hierarchy.json")
 
