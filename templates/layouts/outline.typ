@@ -39,8 +39,10 @@
 
     // Read directly from hierarchy in config.typ
     #for (i, chapter-entry) in hierarchy.enumerate() {
-      // Fixed: use format-chapter-id with index
-      let chap-id = format-chapter-id(str(i + 1), hierarchy.len())
+      // Fixed: use custom number if available
+      let explicit-num = chapter-entry.at("number", default: none)
+      let ch-num = if explicit-num != none { str(explicit-num) } else { str(i + 1) }
+      let chap-id = format-chapter-id(ch-num, hierarchy.len())
 
       block(breakable: false)[
         #text(
@@ -82,10 +84,13 @@
           }
 
           // Added: use format-page-id for display
-          let page-display-id = format-page-id(str(j + 1), chapter-entry.pages.len(), hierarchy.len())
+          let explicit-pg-num = page-entry.at("number", default: none)
+          let pg-num-val = if explicit-pg-num != none { str(explicit-pg-num) } else { str(j + 1) }
+          let full-id = ch-num + "." + pg-num-val
+          let page-display-id = format-page-id(full-id, chapter-entry.pages.len(), hierarchy.len())
 
           (
-            text(fill: theme.text-muted, font: font, weight: "medium")[#subchap-name #page-display-id],
+            text(fill: theme.text-muted, font: font, weight: "medium")[#chapter-name #page-display-id],
             box(width: 100%)[
               #text(font: font, fill: theme.text-main)[#page-entry.title]
               #box(width: 1fr, repeat[#text(fill: theme.text-muted.transparentize(70%))[. ]])

@@ -32,7 +32,9 @@
 
 #for (i, chapter) in hierarchy.enumerate() {
   let chapter-idx = str(i)
-  let chapter-display-id = format-chapter-id(str(i + 1), hierarchy.len())
+  let ch-num = str(chapter.at("number", default: i + 1))
+  let total-chapters = hierarchy.len()
+  let chapter-display-id = format-chapter-id(ch-num, total-chapters)
   let total-pages = chapter.pages.len()
 
   if target == none or target == "chapter-" + chapter-idx {
@@ -47,8 +49,9 @@
 
   for (j, page) in chapter.pages.enumerate() {
     let page-idx = str(j)
+    let pg-num = str(page.at("number", default: j + 1))
     let page-target = chapter-idx + "/" + page-idx
-    let page-display-id = format-page-id(str(i + 1) + "." + str(j + 1), total-pages, hierarchy.len())
+    let page-display-id = format-page-id(ch-num + "." + pg-num, total-pages, total-chapters)
 
     if target == none or target == page-target {
       // Inject chapter metadata if missing (for single page compilation)
@@ -56,7 +59,7 @@
         [#metadata((chapter-name + " " + chapter-display-id, chapter.title)) #label("chapter-" + str(i + 1))]
       }
       show: project.with(
-        number: subchap-name + " " + page-display-id,
+        number: chapter-name + " " + page-display-id,
         title: page.title,
       )
       include "../content/" + chapter-idx + "/" + page-idx + ".typ"
