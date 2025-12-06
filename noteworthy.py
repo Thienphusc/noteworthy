@@ -64,6 +64,48 @@ SAD_FACE = ["       __", "  _   / /", " (_) | | ", "     | | ", "  _  | | ", " (
 # UTILITY FUNCTIONS
 # =============================================================================
 
+
+
+def load_config_safe():
+    try:
+        if CONFIG_FILE.exists():
+            return json.loads(CONFIG_FILE.read_text())
+    except: pass
+    return {}
+
+
+
+
+
+
+
+def get_formatted_name(path_str, hierarchy, config=None):
+    """Get fully formatted name like 'Problem 01.01' (index-based)"""
+    if config is None: config = load_config_safe()
+    
+    path = Path(path_str)
+    if not path.stem.isdigit() or not path.parent.name.isdigit():
+        return path.name
+        
+    ci = int(path.parent.name)
+    pi = int(path.stem)
+    
+    total_chapters = len(hierarchy)
+    total_pages = 0
+    if ci < len(hierarchy):
+        total_pages = len(hierarchy[ci].get("pages", []))
+        
+    # Calculate widths
+    ch_width = len(str(total_chapters))
+    pg_width = len(str(total_pages)) if total_pages > 0 else 2
+    
+    # Pad indices (1-based for display)
+    ch_disp = str(ci + 1).zfill(ch_width)
+    pg_disp = str(pi + 1).zfill(pg_width)
+    
+    label = config.get("subchap-name", "Section")
+    return f"{label} {ch_disp}.{pg_disp}"
+
 def check_dependencies():
     if not shutil.which("typst"):
         print("Error: 'typst' not found. Install from https://typst.app")
@@ -130,60 +172,42 @@ def save_indexignore(ignored_set):
     except: pass
 
 def sync_hierarchy_with_content():
-    """Compare hierarchy.json with actual content files. Returns (missing_files, new_files)."""
+    """Compare hierarchy.json with actual content files (index-based)."""
     hierarchy = json.loads(HIERARCHY_FILE.read_text())
     
-    # Get all page IDs from hierarchy
-    hierarchy_ids = set()
-    for ch in hierarchy:
-        for pg in ch.get("pages", []):
-            hierarchy_ids.add(pg["id"])
+    missing_files = []
+    new_files = []
     
-    # Get all content files from disk
+    # 1. Check hierarchy against disk (Missing)
+    for i, ch in enumerate(hierarchy):
+        for j, pg in enumerate(ch.get("pages", [])):
+            path = Path(f"content/{i}/{j}.typ")
+            if not path.exists():
+                missing_files.append(str(path))
+                
+    # 2. Check disk against hierarchy (New/Extra)
     content_dir = Path("content")
-    disk_ids = set()
     if content_dir.exists():
-        for chapter_dir in content_dir.iterdir():
-            if chapter_dir.is_dir() and chapter_dir.name.startswith("chapter"):
-                for f in chapter_dir.glob("*.typ"):
-                    disk_ids.add(f.stem)
-    
-    # Find differences
-    missing_files = hierarchy_ids - disk_ids  # In hierarchy but not on disk
-    new_files = disk_ids - hierarchy_ids       # On disk but not in hierarchy
-    
+        for ch_dir in content_dir.iterdir():
+            if ch_dir.is_dir() and ch_dir.name.isdigit():
+                i = int(ch_dir.name)
+                # Check if chapter index is valid in hierarchy
+                if i >= len(hierarchy):
+                    # Whole chapter is extra
+                    for f in ch_dir.glob("*.typ"):
+                        new_files.append(str(f))
+                else:
+                    # Check pages
+                    for f in ch_dir.glob("*.typ"):
+                        if f.stem.isdigit():
+                            j = int(f.stem)
+                            pages = hierarchy[i].get("pages", [])
+                            if j >= len(pages):
+                                new_files.append(str(f))
+                                
     return sorted(missing_files), sorted(new_files)
 
-def add_single_file_to_hierarchy(page_id, title=""):
-    """Add a single page to hierarchy.json with given title."""
-    try:
-        hierarchy = json.loads(HIERARCHY_FILE.read_text())
-        ch_num = int(page_id[:2])
-        
-        # Find or create chapter
-        target_ch = None
-        for ch in hierarchy:
-            pages = ch.get("pages", [])
-            if pages and pages[0]["id"].startswith(f"{ch_num:02d}."):
-                target_ch = ch
-                break
-        
-        if not target_ch:
-            # Create new chapter
-            target_ch = {"title": f"Chapter {ch_num}", "summary": "", "pages": []}
-            hierarchy.append(target_ch)
-        
-        # Add page
-        new_page = {"id": page_id, "title": title or "Untitled"}
-        if "pages" not in target_ch:
-            target_ch["pages"] = []
-        target_ch["pages"].append(new_page)
-        target_ch["pages"].sort(key=lambda p: p["id"])
-        
-        HIERARCHY_FILE.write_text(json.dumps(hierarchy, indent=4))
-        return True
-    except:
-        return False
+
 
 def compile_target(target, output, page_offset=None, page_map=None, extra_flags=None, callback=None, log_callback=None):
     cmd = ["typst", "compile", str(RENDERER_FILE), str(output), "--root", str(BASE_DIR), "--input", f"target={target}"]
@@ -295,13 +319,14 @@ def create_pdf_metadata(chapters, page_map, output_file):
         if key in page_map:
             bookmarks.extend([f"BookmarkBegin", f"BookmarkTitle: {title}", f"BookmarkLevel: 1", f"BookmarkPageNumber: {page_map[key]}"])
     
-    for ch in chapters:
-        ch_id = ch["pages"][0]["id"][:2]
+    for ci, ch in chapters:
+        ch_id = str(ci + 1)
         if f"chapter-{ch_id}" in page_map:
             bookmarks.extend([f"BookmarkBegin", f"BookmarkTitle: {ch['title']}", f"BookmarkLevel: 1", f"BookmarkPageNumber: {page_map[f'chapter-{ch_id}']}"])
-        for p in ch["pages"]:
-            if p["id"] in page_map:
-                bookmarks.extend([f"BookmarkBegin", f"BookmarkTitle: {p['title']}", f"BookmarkLevel: 2", f"BookmarkPageNumber: {page_map[p['id']]}"])
+        for ai, p in enumerate(ch["pages"]):
+            key = f"{ci}/{ai}"
+            if key in page_map:
+                bookmarks.extend([f"BookmarkBegin", f"BookmarkTitle: {p['title']}", f"BookmarkLevel: 2", f"BookmarkPageNumber: {page_map[key]}"])
     
     Path(output_file).write_text('\n'.join(bookmarks))
 
@@ -598,6 +623,7 @@ def show_error_screen(scr, error):
             break
 
 def show_success_screen(scr, page_count, has_warnings=False, typst_logs=None):
+    with open("debug_trace.log", "a") as f: f.write("Entered show_success_screen\n")
     view_log = False
     copied = False
     while True:
@@ -635,6 +661,7 @@ def show_success_screen(scr, page_count, has_warnings=False, typst_logs=None):
         
         scr.refresh()
         key = scr.getch()
+        if key == -1: continue
         if key == ord('v') and has_warnings:
             view_log = not view_log
             copied = False
@@ -718,13 +745,13 @@ class BuildMenu:
                     cb = "[✓]" if self.ch_selected(ci) else "[~]" if self.ch_partial(ci) else "[ ]"
                     cc = 2 if self.ch_selected(ci) else 3 if self.ch_partial(ci) else 4
                     TUI.safe_addstr(self.scr, y, bx + 4, cb, curses.color_pair(cc))
-                    ch_num = ch['pages'][0]['id'][:2] if ch.get('pages') else f"{ci+1:02d}"
+                    ch_num = str(ci + 1)
                     TUI.safe_addstr(self.scr, y, bx + 7, f" Ch {ch_num}: {ch['title']}"[:bw-12], curses.color_pair(1))
                 else:
                     p = self.hierarchy[ci]["pages"][ai]
                     sel = self.selected.get((ci, ai), False)
                     TUI.safe_addstr(self.scr, y, bx + 6, "[✓]" if sel else "[ ]", curses.color_pair(2 if sel else 4))
-                    TUI.safe_addstr(self.scr, y, bx + 9, f" {p['id']}: {p['title']}"[:bw-14], curses.color_pair(4))
+                    TUI.safe_addstr(self.scr, y, bx + 9, f" {str(ai+1)}: {p['title']}"[:bw-14], curses.color_pair(4))
         
         def opts(sy, bx, bw):
             for i, (lbl, val, key) in enumerate([
@@ -1211,20 +1238,55 @@ class ConfigEditor(ListEditor):
         super().__init__(scr, "CONFIG EDITOR")
         self.config = json.loads(CONFIG_FILE.read_text())
         themes = extract_themes()
-        self.fields = [
-            ("title", "Title", "str"), ("subtitle", "Subtitle", "str"),
-            ("authors", "Authors", "list"), ("affiliation", "Affiliation", "str"),
-            ("font", "Body Font", "str"), ("title-font", "Title Font", "str"),
-            ("display-mode", "Theme", "choice", themes),
-            ("show-solution", "Show Solutions", "bool"),
-            ("display-cover", "Display Cover", "bool"),
-            ("display-outline", "Display Outline", "bool"),
-            ("display-chap-cover", "Chapter Covers", "bool"),
-            ("chapter-name", "Chapter Label", "str"), ("subchap-name", "Section Label", "str"),
-            ("box-margin", "Box Margin", "str"), ("box-inset", "Box Inset", "str"),
-            ("render-sample-count", "Render Samples", "int"),
-            ("render-implicit-count", "Implicit Samples", "int"),
-        ]
+        
+        # Metadata for known fields to ensure nice display and ordering
+        # Key: (Label, Type, [Options])
+        field_meta = {
+            "title": ("Title", "str"),
+            "subtitle": ("Subtitle", "str"),
+            "authors": ("Authors", "list"),
+            "affiliation": ("Affiliation", "str"),
+            "font": ("Body Font", "str"),
+            "title-font": ("Title Font", "str"),
+            "display-mode": ("Theme", "choice", themes),
+            "show-solution": ("Show Solutions", "bool"),
+            "display-cover": ("Display Cover", "bool"),
+            "display-outline": ("Display Outline", "bool"),
+            "display-chap-cover": ("Chapter Covers", "bool"),
+            "chapter-name": ("Chapter Label", "str"),
+            "subchap-name": ("Section Label", "str"),
+            "box-margin": ("Box Margin", "str"),
+            "box-inset": ("Box Inset", "str"),
+            "render-sample-count": ("Render Samples", "int"),
+            "render-implicit-count": ("Implicit Samples", "int"),
+            "pad-chapter-id": ("Pad Chapter ID", "bool"),
+            "pad-page-id": ("Pad Page ID", "bool"),
+        }
+
+        self.fields = []
+        processed_keys = set()
+
+        # 1. Add known fields in order
+        for key, meta in field_meta.items():
+            if key in self.config:
+                if len(meta) == 3:
+                    self.fields.append((key, meta[0], meta[1], meta[2]))
+                else:
+                    self.fields.append((key, meta[0], meta[1]))
+                processed_keys.add(key)
+        
+        # 2. Add any other fields found in config.json
+        for key, val in self.config.items():
+            if key not in processed_keys:
+                # Infer type
+                if isinstance(val, bool): ftype = "bool"
+                elif isinstance(val, int): ftype = "int"
+                elif isinstance(val, list): ftype = "list"
+                else: ftype = "str"
+                
+                label = key.replace("-", " ").title()
+                self.fields.append((key, label, ftype))
+
         self.items = self.fields
         self.box_title = "Settings"
 
@@ -1319,36 +1381,32 @@ class HierarchyEditor(ListEditor):
     def __init__(self, scr):
         super().__init__(scr, "HIERARCHY EDITOR")
         self.hierarchy = json.loads(HIERARCHY_FILE.read_text())
+        self.config = load_config_safe()
         self._build_items()
-        self.box_title = "Structure"
+        self.box_title = "Hierarchy"
         self.box_width = 75
     
     def _build_items(self):
         self.items = []
         for ci, ch in enumerate(self.hierarchy):
-            self.items.append(("ch_title", ci, None, ch.get("title", "")))
-            self.items.append(("ch_summary", ci, None, ch.get("summary", "")))
-            for pi, pg in enumerate(ch.get("pages", [])):
-                self.items.append(("pg_id", ci, pi, pg.get("id", "")))
-                self.items.append(("pg_title", ci, pi, pg.get("title", "")))
+            self.items.append(("ch_title", ci, None, ch))
+            self.items.append(("ch_summary", ci, None, ch))
+            for pi, p in enumerate(ch.get("pages", [])):
+                self.items.append(("pg_title", ci, pi, p))
             self.items.append(("add_page", ci, None, None))
         self.items.append(("add_chapter", None, None, None))
     
     def _get_value(self, item):
         t, ci, pi, _ = item
-        if t == "ch_title": return self.hierarchy[ci].get("title", "")
-        if t == "ch_summary":
-            s = self.hierarchy[ci].get("summary", "")
-            return s[:40] + "..." if len(s) > 40 else s
-        if t == "pg_id": return self.hierarchy[ci]["pages"][pi].get("id", "")
-        if t == "pg_title": return self.hierarchy[ci]["pages"][pi].get("title", "")
+        if t == "ch_title": return self.hierarchy[ci]["title"]
+        elif t == "ch_summary": return self.hierarchy[ci]["summary"]
+        elif t == "pg_title": return self.hierarchy[ci]["pages"][pi]["title"]
         return ""
     
     def _set_value(self, val):
         t, ci, pi, _ = self.items[self.cursor]
         if t == "ch_title": self.hierarchy[ci]["title"] = val
         elif t == "ch_summary": self.hierarchy[ci]["summary"] = val
-        elif t == "pg_id": self.hierarchy[ci]["pages"][pi]["id"] = val
         elif t == "pg_title": self.hierarchy[ci]["pages"][pi]["title"] = val
         self.modified = True; self._build_items()
     
@@ -1362,13 +1420,7 @@ class HierarchyEditor(ListEditor):
                 self.cursor = i; break
     
     def _add_page(self, ci):
-        existing_ids = [p["id"] for ch in self.hierarchy for p in ch.get("pages", [])]
-        ch_prefix = f"{ci+1:02d}"
-        page_num = 1
-        while f"{ch_prefix}.{page_num:02d}" in existing_ids: page_num += 1
-        new_id = f"{ch_prefix}.{page_num:02d}"
-        
-        new_page = {"id": new_id, "title": "New Page"}
+        new_page = {"title": "New Page"}
         self.hierarchy[ci]["pages"].append(new_page)
         self.modified = True
         self._build_items()
@@ -1398,17 +1450,23 @@ class HierarchyEditor(ListEditor):
         if selected: TUI.safe_addstr(self.scr, y, x + 2, ">", curses.color_pair(3) | curses.A_BOLD)
         
         if t == "ch_title":
-            TUI.safe_addstr(self.scr, y, x + 4, f"Ch {ci+1} Title:", curses.color_pair(1) | curses.A_BOLD)
-            TUI.safe_addstr(self.scr, y, x + 18, self._get_value(item)[:width-22], curses.color_pair(4))
+            # Inline formatting
+            ch_count = len(self.hierarchy)
+            width = 3 if ch_count >= 100 else 2
+            ch_num = str(ci + 1)
+            if self.config.get("pad-chapter-id", True):
+                ch_num = ch_num.zfill(width)
+            label = self.config.get("chapter-name", "Chapter")
+            # Truncate label if too long
+            label = (label[:6] + "..") if len(label) > 8 else label
+            TUI.safe_addstr(self.scr, y, x + 4, f"{label} {ch_num} Title:", curses.color_pair(1) | curses.A_BOLD)
+            TUI.safe_addstr(self.scr, y, x + 18, str(self._get_value(item))[:width-22], curses.color_pair(4))
         elif t == "ch_summary":
-            TUI.safe_addstr(self.scr, y, x + 4, "  Summary:", curses.color_pair(4))
-            TUI.safe_addstr(self.scr, y, x + 18, self._get_value(item)[:width-22], curses.color_pair(4))
-        elif t == "pg_id":
-            TUI.safe_addstr(self.scr, y, x + 6, "Page ID:", curses.color_pair(5))
-            TUI.safe_addstr(self.scr, y, x + 18, self._get_value(item)[:width-22], curses.color_pair(4))
+            TUI.safe_addstr(self.scr, y, x + 6, "Summary:", curses.color_pair(4))
+            TUI.safe_addstr(self.scr, y, x + 18, str(self._get_value(item))[:width-22], curses.color_pair(4))
         elif t == "pg_title":
-            TUI.safe_addstr(self.scr, y, x + 6, "  Title:", curses.color_pair(4))
-            TUI.safe_addstr(self.scr, y, x + 18, self._get_value(item)[:width-22], curses.color_pair(4))
+            TUI.safe_addstr(self.scr, y, x + 6, "Title:", curses.color_pair(4))
+            TUI.safe_addstr(self.scr, y, x + 18, str(self._get_value(item))[:width-22], curses.color_pair(4))
         elif t == "add_page":
             TUI.safe_addstr(self.scr, y, x + 6, "+ Add page to this chapter...", curses.color_pair(3 if selected else 4) | curses.A_DIM)
         elif t == "add_chapter":
@@ -1922,36 +1980,8 @@ class BuildUI:
 # =============================================================================
 
 def auto_fix_config():
-    """Automatically detect chapter naming convention from content folder"""
-    content_dir = BASE_DIR / "content"
-    if not content_dir.exists(): return
-
-    found_prefix = None
-    for p in content_dir.iterdir():
-        if p.is_dir() and " " in p.name:
-            # Look for pattern "name XX"
-            parts = p.name.rsplit(" ", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                found_prefix = parts[0]
-                # Convert "chapter" -> "Chapter", "problem" -> "Problem"
-                # Preserve casing if it looks intentional, otherwise Title Case
-                if found_prefix.islower(): found_prefix = found_prefix.title()
-                break
-    
-    if not found_prefix: return
-
-    try:
-        if CONFIG_FILE.exists():
-            config = json.loads(CONFIG_FILE.read_text())
-            current = config.get("chapter-name", "")
-            
-            # If mismatch (case-insensitive), update it
-            if current.lower() != found_prefix.lower():
-                logging.info(f"Config mismatch detected. Updating chapter-name: '{current}' -> '{found_prefix}'")
-                config["chapter-name"] = found_prefix
-                CONFIG_FILE.write_text(json.dumps(config, indent=4))
-    except Exception as e:
-        logging.error(f"Failed to auto-fix config: {e}")
+    """No longer needed - folder structure is now purely numeric."""
+    pass
 
 def run_build(scr, args, hierarchy, opts):
     if opts['debug']:
@@ -2002,20 +2032,21 @@ def run_build(scr, args, hierarchy, opts):
             ui.log(f"{label} compiled", True)
     
     for ci, ch in chapters:
-        ch_id = ch["pages"][0]["id"][:2]
+        ch_id = str(ci + 1)
         ui.set_task(f"Chapter {ch_id}: {ch['title']}")
-        out = BUILD_DIR / f"10_chapter_{ch_id}_cover.pdf"
+        out = BUILD_DIR / f"10_chapter_{ci}_cover.pdf"
         page_map[f"chapter-{ch_id}"] = current
-        compile_target(f"chapter-{ch_id}", out, page_offset=current, extra_flags=flags, callback=ui.refresh, log_callback=ui.log_typst)
+        compile_target(f"chapter-{ci}", out, page_offset=current, extra_flags=flags, callback=ui.refresh, log_callback=ui.log_typst)
         pdfs.append(out); current += get_pdf_page_count(out)
         prog += 1; ui.set_progress(prog, total + 1)
         
         for ai in sorted(by_ch[ci]):
             p = ch["pages"][ai]
-            ui.set_task(f"Section {p['id']}: {p['title']}")
-            out = BUILD_DIR / f"20_page_{p['id']}.pdf"
-            page_map[p["id"]] = current
-            compile_target(p["id"], out, page_offset=current, extra_flags=flags, callback=ui.refresh, log_callback=ui.log_typst)
+            pg_id = str(ai + 1)
+            ui.set_task(f"Section {pg_id}: {p['title']}")
+            out = BUILD_DIR / f"20_page_{ci}_{ai}.pdf"
+            page_map[f"{ci}/{ai}"] = current
+            compile_target(f"{ci}/{ai}", out, page_offset=current, extra_flags=flags, callback=ui.refresh, log_callback=ui.log_typst)
             pdfs.append(out); current += get_pdf_page_count(out)
             prog += 1; ui.set_progress(prog, total + 1)
         
@@ -2045,7 +2076,7 @@ def run_build(scr, args, hierarchy, opts):
     
     ui.set_phase("Adding Metadata")
     bm = BUILD_DIR / "bookmarks.txt"
-    create_pdf_metadata([ch for _, ch in chapters], page_map, bm)
+    create_pdf_metadata(chapters, page_map, bm)
     apply_pdf_metadata(OUTPUT_FILE, bm, "Noteworthy Framework", "Sihoo Lee, Lee Hojun")
     ui.log("PDF metadata applied", True)
     
@@ -2062,6 +2093,9 @@ def run_build(scr, args, hierarchy, opts):
     ui.log(f"Created {OUTPUT_FILE} ({current - 1} pages)", True)
     
     scr.nodelay(False)
+    scr.timeout(-1) # Reset to blocking mode
+    curses.flushinp() # Clear input buffer
+    with open("debug_trace.log", "a") as f: f.write("Calling show_success_screen\n")
     show_success_screen(scr, current - 1, ui.has_warnings, ui.typst_logs)
 
 # =============================================================================
@@ -2328,15 +2362,24 @@ class HierarchyWizard:
             has_content = False
             if content_dir.exists():
                 chapters = {}
-                for ch_dir in sorted(content_dir.glob("chapter *")):
+                # Scan numeric-only folders (01, 02, etc.)
+                for ch_dir in sorted(content_dir.iterdir()):
+                    if not ch_dir.is_dir() or not ch_dir.name.isdigit():
+                        continue
                     try:
-                        ch_num = int(ch_dir.name.split()[-1])
+                        ch_num = int(ch_dir.name)
                         pages = []
                         for p in sorted(ch_dir.glob("*.typ")):
                             pages.append({"id": p.stem, "title": "Untitled Section"})
                         if pages:
+                            # Get chapter-name from config for title display
+                            try:
+                                config = json.loads(CONFIG_FILE.read_text())
+                                chap_name = config.get("chapter-name", "Chapter")
+                            except:
+                                chap_name = "Chapter"
                             chapters[ch_num] = {
-                                "title": f"Chapter {ch_num}",
+                                "title": f"{chap_name} {ch_num}",
                                 "summary": "",
                                 "pages": pages
                             }
@@ -2445,8 +2488,11 @@ class SyncWizard:
     """Wizard for resolving hierarchy vs content discrepancies"""
     def __init__(self, scr, missing_files, new_files):
         self.scr = scr
-        self.missing_files = missing_files  # In hierarchy, not on disk
-        self.new_files = new_files          # On disk, not in hierarchy
+        self.missing_files = missing_files
+        self.new_files = new_files
+        self.config = load_config_safe()
+        try: self.hierarchy = json.loads(HIERARCHY_FILE.read_text())
+        except: self.hierarchy = []
         
     def refresh(self):
         h, w = self.scr.getmaxyx()
@@ -2459,25 +2505,30 @@ class SyncWizard:
         col_w = (w - 8) // 2
         left_x = 2
         right_x = left_x + col_w + 4
-        list_h = h - 12
+        list_h = h - 13
         
         # Left Column: Missing on Disk (Only in Hierarchy)
         TUI.draw_box(self.scr, 5, left_x, list_h + 2, col_w, f" Missing on Disk ({len(self.missing_files)}) ")
         for i, f in enumerate(self.missing_files[:list_h]):
-            TUI.safe_addstr(self.scr, 6 + i, left_x + 2, f"- {f}", curses.color_pair(4))
+            name = get_formatted_name(f, self.hierarchy, self.config)
+            TUI.safe_addstr(self.scr, 6 + i, left_x + 2, f"- {name} ({f})", curses.color_pair(4))
             
         # Right Column: New on Disk (Only in Content)
         TUI.draw_box(self.scr, 5, right_x, list_h + 2, col_w, f" New on Disk ({len(self.new_files)}) ")
         for i, f in enumerate(self.new_files[:list_h]):
-            TUI.safe_addstr(self.scr, 6 + i, right_x + 2, f"+ {f}", curses.color_pair(2))
+            name = get_formatted_name(f, self.hierarchy, self.config)
+            TUI.safe_addstr(self.scr, 6 + i, right_x + 2, f"+ {name} ({f})", curses.color_pair(2))
             
         # Options
-        opts_y = h - 4
+        opts_y = h - 5
         TUI.safe_addstr(self.scr, opts_y, 4, "[A] Adopt Disk State (Update Hierarchy)", curses.color_pair(1) | curses.A_BOLD)
         TUI.safe_addstr(self.scr, opts_y + 1, 8, "Removes missing, Adds new", curses.color_pair(4))
         
-        TUI.safe_addstr(self.scr, opts_y, w // 2 + 4, "[B] Adopt Hierarchy (Create Files)", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, opts_y, w // 2 + 4, "[B] Create Missing Files", curses.color_pair(1) | curses.A_BOLD)
         TUI.safe_addstr(self.scr, opts_y + 1, w // 2 + 8, "Creates scaffold for missing files", curses.color_pair(4))
+        
+        TUI.safe_addstr(self.scr, opts_y + 3, 4, "[D] Delete Extra Files", curses.color_pair(1) | curses.A_BOLD)
+        TUI.safe_addstr(self.scr, opts_y + 4, 8, "Deletes files not in hierarchy", curses.color_pair(4))
         
         TUI.safe_addstr(self.scr, h - 3, (w - 20) // 2, "Esc: Cancel  Q: Quit", curses.color_pair(4) | curses.A_DIM)
         self.scr.refresh()
@@ -2494,60 +2545,74 @@ class SyncWizard:
                 return self.adopt_disk()
             elif k in (ord('b'), ord('B')):
                 return self.adopt_hierarchy()
+            elif k in (ord('d'), ord('D')):
+                return self.delete_extra()
                 
     def adopt_disk(self):
-        """Update hierarchy.json to match content on disk"""
+        """Update hierarchy.json to match content on disk (index-based)"""
         try:
-            hierarchy = json.loads(HIERARCHY_FILE.read_text())
+            # Scan content/0, content/1...
+            new_hierarchy = []
+            content_dir = Path("content")
+            if not content_dir.exists(): return False
             
-            # 1. Remove missing files
-            for missing in self.missing_files:
-                for ch in hierarchy:
-                    ch["pages"] = [p for p in ch.get("pages", []) if p["id"] != missing]
-                # Clean up empty chapters
-                hierarchy = [ch for ch in hierarchy if ch.get("pages")]
+            # Find max chapter index
+            ch_idxs = []
+            for d in content_dir.iterdir():
+                if d.is_dir() and d.name.isdigit():
+                    ch_idxs.append(int(d.name))
+            ch_idxs.sort()
+            
+            for i in ch_idxs:
+                # Try to preserve titles from old hierarchy if indices match
+                old_ch = self.hierarchy[i] if i < len(self.hierarchy) else {}
+                title = old_ch.get("title", f"Chapter {i+1}")
+                summary = old_ch.get("summary", "")
                 
-            # 2. Add new files
-            for new_id in self.new_files:
-                ch_num = int(new_id[:2])
-                # Find or create chapter
-                target_ch = None
-                for ch in hierarchy:
-                    pages = ch.get("pages", [])
-                    if pages and pages[0]["id"].startswith(f"{ch_num:02d}."):
-                        target_ch = ch
-                        break
+                pages = []
+                ch_dir = content_dir / str(i)
+                pg_idxs = []
+                for f in ch_dir.glob("*.typ"):
+                    if f.stem.isdigit():
+                        pg_idxs.append(int(f.stem))
+                pg_idxs.sort()
                 
-                if not target_ch:
-                    target_ch = {"title": f"Chapter {ch_num}", "summary": "", "pages": []}
-                    hierarchy.append(target_ch)
+                for j in pg_idxs:
+                    old_pg = old_ch.get("pages", [])[j] if "pages" in old_ch and j < len(old_ch["pages"]) else {}
+                    pg_title = old_pg.get("title", "Untitled Section")
+                    pages.append({"title": pg_title})
                     
-                # Check if already exists (sanity check)
-                if not any(p["id"] == new_id for p in target_ch.get("pages", [])):
-                    target_ch["pages"].append({"id": new_id, "title": "Untitled Section"})
-                    
-            # Sort chapters and pages
-            hierarchy.sort(key=lambda c: c["pages"][0]["id"] if c["pages"] else "99")
-            for ch in hierarchy:
-                ch["pages"].sort(key=lambda p: p["id"])
+                new_hierarchy.append({"title": title, "summary": summary, "pages": pages})
                 
-            HIERARCHY_FILE.write_text(json.dumps(hierarchy, indent=4))
+            HIERARCHY_FILE.write_text(json.dumps(new_hierarchy, indent=4))
             return True
         except Exception as e:
             return False
 
     def adopt_hierarchy(self):
-        """Create missing files on disk to match hierarchy"""
+        """Create missing files on disk to match hierarchy (index-based)"""
         try:
             for missing in self.missing_files:
-                ch_num = missing[:2]
-                ch_dir = Path(f"content/chapter {ch_num}")
-                ch_dir.mkdir(parents=True, exist_ok=True)
-                
-                file_path = ch_dir / f"{missing}.typ"
-                if not file_path.exists():
-                    # Create scaffold
-                    file_path.write_text(f'#import "../../../templates/templater.typ": *\n\n= Section Title\n\nWrite your content here.')
+                path = Path(missing)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if not path.exists():
+                    path.write_text(f'#import "../../templates/templater.typ": *\n\nWrite your content here.')
+            return True
+
+        except:
+            return False
+
+    def delete_extra(self):
+        """Delete extra files on disk"""
+        try:
+            for f in self.new_files:
+                path = Path(f)
+                if path.exists(): path.unlink()
+                # Remove empty chapter dir if empty
+                try:
+                    if path.parent.exists() and not any(path.parent.iterdir()):
+                        path.parent.rmdir()
+                except: pass
             return True
         except:
             return False
@@ -2577,6 +2642,13 @@ def restore_templates(scr):
             if item['type'] == 'blob' and item['path'].startswith('templates/'):
                 path_str = item['path']
                 if path_str in EXCLUDE_FILES: continue
+                
+                if path_str == "templates/config/preface.typ":
+                    local_path = Path(path_str)
+                    if not local_path.exists():
+                        local_path.parent.mkdir(parents=True, exist_ok=True)
+                        local_path.write_text("")
+                    continue
                 
                 local_path = Path(path_str)
                 if not local_path.exists():
@@ -2622,6 +2694,7 @@ class MainMenu:
         self.selected = 1 # Default to Builder
 
     def run(self):
+        self.scr.timeout(-1) # Ensure blocking mode
         while True:
             if not TUI.check_terminal_size(self.scr): return None
             h_raw, w_raw = self.scr.getmaxyx()
@@ -2822,3 +2895,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

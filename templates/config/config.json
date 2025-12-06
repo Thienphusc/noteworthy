@@ -21,5 +21,7 @@
     "box-inset": "15pt",
     "render-sample-count": 1000,
     "render-implicit-count": 400,
-    "display-mode": "rose-pine"
+    "display-mode": "rose-pine",
+    "pad-chapter-id": true,
+    "pad-page-id": true
 }
