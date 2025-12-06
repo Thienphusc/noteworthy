@@ -48,7 +48,7 @@
   for (j, page) in chapter.pages.enumerate() {
     let page-idx = str(j)
     let page-target = chapter-idx + "/" + page-idx
-    let page-display-id = format-page-id(str(j + 1), total-pages, hierarchy.len())
+    let page-display-id = format-page-id(str(i + 1) + "." + str(j + 1), total-pages, hierarchy.len())
 
     if target == none or target == page-target {
       // Inject chapter metadata if missing (for single page compilation)
