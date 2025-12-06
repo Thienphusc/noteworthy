@@ -222,7 +222,9 @@ def compile_target(target, output, page_offset=None, page_map=None, extra_flags=
     fcntl.fcntl(fd_out, fcntl.F_SETFL, fl_out | os.O_NONBLOCK)
     
     while proc.poll() is None:
-        if callback: callback()
+        if callback and callback() is False:
+            proc.terminate()
+            raise Exception("Build cancelled")
         try:
             chunk = proc.stderr.read(4096)
             if chunk:
@@ -440,10 +442,7 @@ class BaseEditor:
             if not TUI.check_terminal_size(self.scr): return
             k = self.scr.getch()
             if k == 27:  # Esc
-                if self.modified:
-                    c = TUI.prompt_save(self.scr)
-                    if c == 'y': self.save()
-                    elif c == 'c': self.refresh(); continue
+                if self.modified: self.save()
                 return
             elif k == ord('s') and self.save():
                 TUI.show_saved(self.scr)
@@ -470,12 +469,13 @@ class ListEditor(BaseEditor):
         self.scr.clear()
         
         # Calculate layout
-        list_h = min(len(self.items) + 2, h - 6)
+        list_h = min(len(self.items) + 2, h - 8)
         total_h = 2 + list_h + 2 # Title + Box + Footer
         start_y = max(1, (h - total_h) // 2)
         
         # Title
-        TUI.safe_addstr(self.scr, start_y, (w - len(self.title)) // 2, self.title, curses.color_pair(1) | curses.A_BOLD)
+        title_str = f"{self.title}{' *' if self.modified else ''}"
+        TUI.safe_addstr(self.scr, start_y, (w - len(title_str)) // 2, title_str, curses.color_pair(1) | curses.A_BOLD)
         
         # Box
         bw = min(self.box_width, w - 4)
@@ -497,9 +497,8 @@ class ListEditor(BaseEditor):
         self.scr.refresh()
         
     def _draw_footer(self, h, w):
-        footer = "Press ? for keybinds"
-        if self.modified: footer = "* " + footer
-        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        footer = "Esc: Save & Exit"
+        TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
     def _handle_input(self, k):
         if k in (curses.KEY_UP, ord('k')):
@@ -688,7 +687,7 @@ class BuildMenu:
         lh, obh = len(LOGO), 7
         # Calculate available chapter rows in vertical layout
         # Need: start_y + logo + title(2) + options(obh) + gap(1) + chapters + footer(3)
-        vert_ch_rows = self.h - lh - 2 - obh - 1 - 3
+        vert_ch_rows = self.h - lh - 2 - obh - 1 - 5
         # Use vertical if we can fit at least 5 chapter rows, else try horizontal/compact
         if vert_ch_rows >= 7:  # 5 visible + 2 for box border
             layout = "vert"
@@ -781,8 +780,8 @@ class BuildMenu:
             TUI.draw_box(self.scr, cy, bx, ch, bw, "Select Chapters")
             items(cy, bx, bw, ch)
         
-        footer = "Press ? for keybinds"
-        TUI.safe_addstr(self.scr, self.h - 1, max(0, (self.w - len(footer)) // 2), footer, curses.color_pair(4) | curses.A_DIM)
+        footer = "Space: Toggle  a/n: All/None  Enter: Build  Esc: Back"
+        TUI.safe_addstr(self.scr, self.h - 3, (self.w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
         self.scr.refresh()
     
     def run(self):
@@ -984,13 +983,9 @@ def show_keybindings_menu(scr):
             ("Space", "Toggle selection"),
         ]),
         ("General", [
-            ("Esc", "Go back / Cancel"),
+            ("Esc", "Save & Exit"),
             ("s", "Save (editors)"),
             ("?", "Show this help"),
-        ]),
-        ("Text Editor", [
-            ("Ctrl+S", "Save file"),
-            ("Ctrl+X", "Exit editor"),
         ]),
         ("Build Menu", [
             ("a / n", "Select all / none"),
@@ -1060,7 +1055,7 @@ class TextEditor(BaseEditor):
         self.scr.clear()
         
         # Title
-        title_str = f"{self.title} {'*' if self.modified else ''}"
+        title_str = f"{self.title}{' *' if self.modified else ''}"
         TUI.safe_addstr(self.scr, 0, (w - len(title_str)) // 2, title_str, curses.color_pair(1) | curses.A_BOLD)
         
         # Calculate visual lines
@@ -1079,7 +1074,7 @@ class TextEditor(BaseEditor):
         elif vcy >= self.scroll_y + (h - 2): self.scroll_y = vcy - (h - 3)
         
         # Draw lines
-        for i in range(h - 2):
+        for i in range(h - 4):
             idx = self.scroll_y + i
             if idx >= len(visual_lines): break
             text, l_idx, start_idx = visual_lines[idx]
@@ -1091,12 +1086,12 @@ class TextEditor(BaseEditor):
             TUI.safe_addstr(self.scr, y, 6, text)
         
         # Footer
-        footer = "Ctrl+S:Save  Ctrl+X:Exit"
-        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        footer = "Esc: Save & Exit"
+        TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
         
         # Cursor
         curses.curs_set(1)  # Show cursor
-        cur_y = vcy - self.scroll_y + 1
+        cur_y = vcy - self.scroll_y + 2
         cur_x = 6 + (self.cx - visual_lines[vcy][2])
         if 0 <= cur_y < h - 1 and 0 <= cur_x < w:
             self.scr.move(cur_y, cur_x)
@@ -1127,17 +1122,14 @@ class TextEditor(BaseEditor):
     def run(self):
         TUI.disable_flow_control()
         self.refresh()
+        self.refresh()
         while True:
+            if not TUI.check_terminal_size(self.scr): return None
             k = self.scr.getch()
-            if k in (24, 27): # Ctrl+X or Esc
+            if k == 27: # Esc
                 curses.curs_set(0)  # Hide cursor before exit
-                if self.modified:
-                    c = TUI.prompt_save(self.scr)
-                    if c == 'y': self.save()
-                    elif c == 'c': self.refresh(); continue
+                if self.modified: self.save()
                 return '\n'.join(self.lines) if not self.filepath else None
-            elif k == 19: # Ctrl+S
-                if self.save(): TUI.show_saved(self.scr)
             else:
                 self._handle_input(k)
             self.refresh()
@@ -1262,9 +1254,8 @@ class ConfigEditor(ListEditor):
             TUI.safe_addstr(self.scr, y, val_x, val[:width-26], curses.color_pair(4))
 
     def _draw_footer(self, h, w):
-        footer = "Press ? for keybinds"
-        if self.modified: footer = "* " + footer
-        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        footer = "Enter/Space: Edit  Esc: Save & Exit"
+        TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
     def _handle_input(self, k):
         if super()._handle_input(k): return True
@@ -1305,6 +1296,16 @@ class ConfigEditor(ListEditor):
                 except: ni = 0
                 self.config[key] = opts[ni]; self.modified = True
             return True
+        elif k in (curses.KEY_LEFT, curses.KEY_RIGHT):
+            if ftype == "choice":
+                opts = f[3]; cur = self.config.get(key, opts[0])
+                try: 
+                    idx = opts.index(cur)
+                    delta = -1 if k == curses.KEY_LEFT else 1
+                    ni = (idx + delta) % len(opts)
+                except: ni = 0
+                self.config[key] = opts[ni]; self.modified = True
+                return True
         
         return False
 
@@ -1410,9 +1411,8 @@ class HierarchyEditor(ListEditor):
             TUI.safe_addstr(self.scr, y, x + 4, "+ Add new chapter...", curses.color_pair(3 if selected else 4) | curses.A_DIM)
 
     def _draw_footer(self, h, w):
-        footer = "Press ? for keybinds"
-        if self.modified: footer = "* " + footer
-        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        footer = "Enter: Edit  d: Delete  Esc: Save & Exit"
+        TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
     def _handle_input(self, k):
         if super()._handle_input(k): return True
@@ -1527,11 +1527,12 @@ class SchemeEditor(ListEditor):
         h, w = self.scr.getmaxyx()
         self.scr.clear()
         
-        list_h = min(len(self.items) + 3, h - 6)
+        list_h = min(len(self.items) + 3, h - 8)
         total_h = 3 + list_h + 2
         start_y = max(1, (h - total_h) // 2)
         
-        TUI.safe_addstr(self.scr, start_y, (w - 14) // 2, self.title, curses.color_pair(1) | curses.A_BOLD)
+        title_str = f"{self.title}{' *' if self.modified else ''}"
+        TUI.safe_addstr(self.scr, start_y, (w - len(title_str)) // 2, title_str, curses.color_pair(1) | curses.A_BOLD)
         
         theme_text = f"< {self.theme_names[self.current_theme]} >"
         TUI.safe_addstr(self.scr, start_y + 1, (w - len(theme_text)) // 2, theme_text, curses.color_pair(5) | curses.A_BOLD)
@@ -1576,9 +1577,8 @@ class SchemeEditor(ListEditor):
         TUI.safe_addstr(self.scr, y, x + left_w + 5, hex_val[:width - left_w - 8], curses.color_pair(4))
 
     def _draw_footer(self, h, w):
-        footer = "Press ? for keybinds"
-        if self.modified: footer = "* " + footer
-        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        footer = "n: New  d: Delete  Enter: Edit  Esc: Save & Exit"
+        TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
     def _handle_input(self, k):
         if super()._handle_input(k): return True
@@ -1663,11 +1663,12 @@ class SnippetsEditor(ListEditor):
         h, w = self.scr.getmaxyx()
         self.scr.clear()
         
-        list_h = min(len(self.items) + 2, h - 6)
+        list_h = min(len(self.items) + 2, h - 8)
         total_h = 2 + list_h + 2
         start_y = max(1, (h - total_h) // 2)
         
-        TUI.safe_addstr(self.scr, start_y, (w - 16) // 2, self.title, curses.color_pair(1) | curses.A_BOLD)
+        title_str = f"{self.title}{' *' if self.modified else ''}"
+        TUI.safe_addstr(self.scr, start_y, (w - len(title_str)) // 2, title_str, curses.color_pair(1) | curses.A_BOLD)
         
         bw = min(self.box_width, w - 4)
         bx = (w - bw) // 2
@@ -1695,9 +1696,8 @@ class SnippetsEditor(ListEditor):
         self.scr.refresh()
 
     def _draw_footer(self, h, w):
-        footer = "Press ? for keybinds"
-        if self.modified: footer = "* " + footer
-        TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        footer = "n: New  d: Delete  Enter: Edit  Esc: Save & Exit"
+        TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
     def _handle_input(self, k):
         if super()._handle_input(k): return True
@@ -1769,7 +1769,7 @@ class IndexignoreEditor(ListEditor):
         self.scr.clear()
         
         bw = min(self.box_width, w - 4)
-        bh = min(h - 6, 20)
+        bh = min(h - 8, 20)
         bx = (w - bw) // 2
         by = (h - bh) // 2
         
@@ -1789,10 +1789,12 @@ class IndexignoreEditor(ListEditor):
                 y = by + 3 + i
                 self._draw_item(y, bx, self.ignored[idx], bw, idx == self.cursor)
         
-        footer = "Press ? for keybinds"
-        if self.modified: footer = "* " + footer
-        TUI.safe_addstr(self.scr, by + bh - 1, bx + (bw - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+        self._draw_footer(h, w)
         self.scr.refresh()
+
+    def _draw_footer(self, h, w):
+        footer = "a: Add  d: Delete  Esc: Save & Exit"
+        TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
     
     def _handle_input(self, k):
         if k in (curses.KEY_UP, ord('k')) and self.ignored:
@@ -1859,8 +1861,8 @@ class BuildUI:
         """Check for user input during build."""
         try:
             k = self.scr.getch()
-            if k == -1:  # No key pressed (timeout)
-                return
+            if k == -1: return True
+            if k == 27: return False # Esc to cancel
             if k == ord('v'):
                 self.view = "typst" if self.view == "normal" else "normal"
                 self.scroll = 0
@@ -1869,11 +1871,11 @@ class BuildUI:
                     self.scroll = max(0, self.scroll - 1)
                 elif k in (curses.KEY_DOWN, ord('j')):
                     self.scroll = min(max(0, len(self.typst_logs) - 1), self.scroll + 1)
-        except:
-            pass
+        except: pass
+        return True
     
     def refresh(self):
-        self.check_input()
+        if not self.check_input(): return False
         
         self.h, self.w = self.scr.getmaxyx()
         self.scr.clear()
@@ -1907,8 +1909,9 @@ class BuildUI:
             for i, (msg, ok) in enumerate(self.logs[-(lh-2):]):
                 TUI.safe_addstr(self.scr, start_y + 9 + i, bx + 2, ("✓ " if ok else "  ") + msg[:bw-6], curses.color_pair(2 if ok else 4))
         
-        TUI.safe_addstr(self.scr, self.h - 1, (self.w - 50) // 2, "Press Ctrl+C to cancel  |  Press 'v' to toggle view", curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(self.scr, self.h - 1, (self.w - 50) // 2, "Esc: Cancel  |  v: Toggle Typst Log", curses.color_pair(4) | curses.A_DIM)
         self.scr.refresh()
+        return True
 
 # =============================================================================
 # BUILD LOGIC
@@ -2066,7 +2069,7 @@ class InitWizard:
     def __init__(self, scr):
         self.scr = scr
         
-        themes = ["rose-pine", "dark", "light", "nord", "dracula", "gruvbox"] # Fallback
+        themes = ["rose-pine", "dark", "light", "nord", "dracula", "gruvbox", "catppuccin-mocha", "catppuccin-latte", "solarized-dark", "solarized-light", "tokyo-night", "everforest", "moonlight", "print"] # Fallback
         if SCHEMES_FILE.exists():
              try:
                  schemes = json.loads(SCHEMES_FILE.read_text())
@@ -2168,7 +2171,7 @@ class InitWizard:
             self.input_w = dw - 4
             
             footer = "Enter:Next  Back:Prev  Esc:Cancel"
-            TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
         else:
             total_h = 16
@@ -2209,7 +2212,7 @@ class InitWizard:
             self.input_x = bx + 2
             self.input_w = bw - 4
             
-            TUI.safe_addstr(self.scr, h - 1, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
             
         self.scr.refresh()
     
@@ -2444,7 +2447,7 @@ class SyncWizard:
         TUI.safe_addstr(self.scr, opts_y, w // 2 + 4, "[B] Adopt Hierarchy (Create Files)", curses.color_pair(1) | curses.A_BOLD)
         TUI.safe_addstr(self.scr, opts_y + 1, w // 2 + 8, "Creates scaffold for missing files", curses.color_pair(4))
         
-        TUI.safe_addstr(self.scr, h - 1, (w - 20) // 2, "Esc: Cancel  Q: Quit", curses.color_pair(4) | curses.A_DIM)
+        TUI.safe_addstr(self.scr, h - 3, (w - 20) // 2, "Esc: Cancel  Q: Quit", curses.color_pair(4) | curses.A_DIM)
         self.scr.refresh()
 
     def run(self):
@@ -2646,7 +2649,7 @@ class MainMenu:
                 footer_y = btn_y + 7
             else:
                 footer_y = btn_start_y + 13
-            TUI.safe_addstr(self.scr, footer_y, (w - 30) // 2, "Press ? for keybinds  Ctrl+C:Quit", curses.color_pair(4) | curses.A_DIM)
+            TUI.safe_addstr(self.scr, h - 3, (w - 30) // 2, "Arrows: Select  Enter: Confirm  Esc: Quit", curses.color_pair(4) | curses.A_DIM)
             
             self.scr.refresh()
             
@@ -2755,6 +2758,10 @@ def run_app(scr, args):
             try:
                 run_build(scr, args, hierarchy, opts)
             except Exception as e:
+                if str(e) == "Build cancelled": 
+                    scr.timeout(-1)
+                    scr.nodelay(False)
+                    continue
                 show_error_screen(scr, e)
 
 def main():
