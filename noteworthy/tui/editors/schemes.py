@@ -4,7 +4,8 @@ import copy
 from ..base import ListEditor, TUI
 from ..components.common import LineEditor
 from ...config import SCHEMES_FILE
-from ...utils import load_config_safe, save_config
+from ...utils import load_config_safe, save_config, register_key
+from ..keybinds import ConfirmBind, KeyBind
 from .text import TextEditor
 
 def extract_themes():
@@ -63,8 +64,18 @@ class ThemeDetailEditor(ListEditor):
         self.theme_name = theme_name
         self.theme = self.schemes[self.theme_name]
         self._build_items()
-        self.box_title = 'Properties'
-        self.box_width = 70
+        self.box_title = 'Schemes'
+        self.box_width = 80
+        
+        register_key(self.keymap, ConfirmBind(self.action_select))
+
+    def action_select(self, ctx):
+        key, _ = self.items[self.cursor]
+        curr_val = self._get_value(key)
+        new_val = LineEditor(self.scr, initial_value=curr_val, title='Edit Color').run()
+        if new_val is not None:
+            self._set_value(key, new_val)
+            self._build_items()
 
     def _build_items(self):
         self.items = []
@@ -161,21 +172,8 @@ class ThemeDetailEditor(ListEditor):
         TUI.safe_addstr(self.scr, y, x + left_w + 5, hex_val[:width - left_w - 8], curses.color_pair(4) | (curses.A_BOLD if selected else 0))
 
     def _draw_footer(self, h, w):
-        footer = 'Enter: Edit  Esc: Back (Auto-saves)'
+        footer = 'Enter: Select  Esc: Save & Exit'
         TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
-
-    def _handle_input(self, k):
-        if super()._handle_input(k):
-            return True
-        if k in (ord('\n'), 10):
-            key, _ = self.items[self.cursor]
-            curr_val = self._get_value(key)
-            new_val = LineEditor(self.scr, initial_value=curr_val, title='Edit Color').run()
-            if new_val is not None:
-                self._set_value(key, new_val)
-                self._build_items()
-            return True
-        return False
 
 class SchemeEditor(ListEditor):
 
@@ -187,6 +185,29 @@ class SchemeEditor(ListEditor):
         self._build_items()
         self.box_title = 'Available Schemes'
         self.box_width = 70
+        
+        register_key(self.keymap, ConfirmBind(self.action_select))
+        register_key(self.keymap, KeyBind('n', self._create_new))
+        register_key(self.keymap, KeyBind('d', self._delete_current_prompt))
+        register_key(self.keymap, KeyBind(' ', self.action_set_active))
+        
+    def action_select(self, ctx):
+        if self.items:
+            name = self.items[self.cursor]
+            if name == '+ Add new scheme...':
+                self._create_new()
+            else:
+                editor = ThemeDetailEditor(self.scr, self.schemes, name)
+                editor.run()
+                if editor.modified:
+                    self.modified = True
+
+    def action_set_active(self, ctx):
+        if self.items:
+            name = self.items[self.cursor]
+            if name != '+ Add new scheme...':
+                self.config['display-mode'] = name
+                save_config(self.config)
 
     def _load_schemes(self):
         return json.loads(SCHEMES_FILE.read_text())
@@ -244,6 +265,10 @@ class SchemeEditor(ListEditor):
             self.modified = True
             self.cursor = min(self.cursor, len(self.items) - 1)
 
+    def _delete_current_prompt(self, ctx):
+        if TUI.prompt_confirm(self.scr, 'Delete scheme? (y/n): '):
+            self._delete_current()
+
     def refresh(self):
         h, w = self.scr.getmaxyx()
         self.scr.clear()
@@ -285,35 +310,5 @@ class SchemeEditor(ListEditor):
             TUI.safe_addstr(self.scr, y, x + width - 12, '(ACTIVE)', curses.color_pair(2) | curses.A_BOLD)
 
     def _draw_footer(self, h, w):
-        footer = 'Enter:Edit Space:Select n:New d:Del Esc:Save x:Export l:Import'
+        footer = 'Enter: Edit  d: Delete  Esc: Save & Exit'
         TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
-
-    def _handle_input(self, k):
-        if super()._handle_input(k):
-            return True
-        if k in (ord('\n'), 10):
-            if self.items:
-                name = self.items[self.cursor]
-                if name == '+ Add new scheme...':
-                    self._create_new()
-                else:
-                    editor = ThemeDetailEditor(self.scr, self.schemes, name)
-                    editor.run()
-                    if editor.modified:
-                        self.modified = True
-            return True
-        elif k == ord(' '):
-            if self.items:
-                name = self.items[self.cursor]
-                if name != '+ Add new scheme...':
-                    self.config['display-mode'] = name
-                    save_config(self.config)
-            return True
-        elif k == ord('n'):
-            self._create_new()
-            return True
-        elif k == ord('d'):
-            if TUI.prompt_confirm(self.scr, 'Delete scheme? (y/n): '):
-                self._delete_current()
-            return True
-        return False

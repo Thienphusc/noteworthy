@@ -2,8 +2,9 @@ import curses
 import json
 from ..base import ListEditor, TUI
 from ..components.common import LineEditor
+from ..keybinds import ConfirmBind, KeyBind
 from ...config import HIERARCHY_FILE
-from ...utils import load_config_safe
+from ...utils import load_config_safe, register_key
 
 class HierarchyEditor(ListEditor):
     def __init__(self, scr):
@@ -14,6 +15,10 @@ class HierarchyEditor(ListEditor):
         self._build_items()
         self.box_title = "Hierarchy"
         self.box_width = 75
+        
+        # Register Binds
+        register_key(self.keymap, ConfirmBind(self.action_edit))
+        register_key(self.keymap, KeyBind(ord('d'), self.action_delete, "Delete Item"))
     
     def _build_items(self):
         self.items = []
@@ -196,27 +201,21 @@ class HierarchyEditor(ListEditor):
         footer = "Enter: Edit  d: Delete  Esc: Save & Exit  x: Export  l: Import"
         TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
-    def _handle_input(self, k):
-        if super()._handle_input(k): return True
-        
-        if k in (ord('\n'), 10):
-            item = self.items[self.cursor]; t, ci, pi, _ = item
-            if t == "add_chapter": self._add_chapter()
-            elif t == "add_page": self._add_page(ci)
-            else:
-                curr_val = str(self._get_value(item))
-                new_val = LineEditor(self.scr, initial_value=curr_val, title="Edit Value").run()
-                if new_val is not None: self._set_value(new_val)
-            return True
-        elif k == ord('d'):
-            item = self.items[self.cursor]; t = item[0]
-            if t not in ("add_chapter", "add_page"):
-                msg = "Delete item?"
-                if t.startswith("ch_"): msg = "Delete ENTIRE Chapter? (y/n): "
-                elif t.startswith("pg_"): msg = "Delete Page? (y/n): "
-                
-                if TUI.prompt_confirm(self.scr, msg):
-                    self._delete_current()
-            return True
-        
-        return False
+    def action_edit(self, ctx):
+        item = self.items[self.cursor]; t, ci, pi, _ = item
+        if t == "add_chapter": self._add_chapter()
+        elif t == "add_page": self._add_page(ci)
+        else:
+            curr_val = str(self._get_value(item))
+            new_val = LineEditor(self.scr, initial_value=curr_val, title="Edit Value").run()
+            if new_val is not None: self._set_value(new_val)
+
+    def action_delete(self, ctx):
+        item = self.items[self.cursor]; t = item[0]
+        if t not in ("add_chapter", "add_page"):
+            msg = "Delete item?"
+            if t.startswith("ch_"): msg = "Delete ENTIRE Chapter? (y/n): "
+            elif t.startswith("pg_"): msg = "Delete Page? (y/n): "
+            
+            if TUI.prompt_confirm(self.scr, msg):
+                self._delete_current()

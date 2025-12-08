@@ -2,8 +2,10 @@ import curses
 import json
 from ..base import TUI
 from ...config import CONFIG_FILE, LOGO
-from ...utils import load_config_safe
+from ...config import CONFIG_FILE, LOGO
+from ...utils import load_config_safe, register_key, handle_key_event
 from ..editors.schemes import extract_themes
+from ..keybinds import KeyBind, NavigationBind, ConfirmBind
 
 class InitWizard:
 
@@ -16,8 +18,63 @@ class InitWizard:
         self.choice_index = 0
         self.input_y = 0
         self.input_x = 0
-        self.input_w = 50
+        input_w = 50
         TUI.init_colors()
+        
+        self.keymap = {}
+        
+        # Register Binds
+        register_key(self.keymap, KeyBind(27, self.action_cancel, "Cancel"))
+        register_key(self.keymap, KeyBind([curses.KEY_BACKSPACE, 127, 8], self.action_prev, "Previous Step"))
+        register_key(self.keymap, ConfirmBind(self.action_next))
+        register_key(self.keymap, NavigationBind('LEFT', self.action_choice_left))
+        register_key(self.keymap, NavigationBind('RIGHT', self.action_choice_right))
+        
+    def action_cancel(self, ctx):
+        return 'EXIT'
+
+    def action_prev(self, ctx):
+        if self.current_step > 0:
+            self.current_step -= 1
+            if self.steps[self.current_step][3] == 'choice':
+                choices = self.steps[self.current_step][4]
+                curr = self.config.get(self.steps[self.current_step][0], choices[0])
+                self.choice_index = choices.index(curr) if curr in choices else 0
+
+    def action_choice_left(self, ctx):
+        step = self.steps[self.current_step]; stype = step[3]
+        if stype == 'choice':
+            choices = step[4]
+            self.choice_index = (self.choice_index - 1) % len(choices)
+
+    def action_choice_right(self, ctx):
+        step = self.steps[self.current_step]; stype = step[3]
+        if stype == 'choice':
+            choices = step[4]
+            self.choice_index = (self.choice_index + 1) % len(choices)
+            
+    def action_next(self, ctx):
+        step = self.steps[self.current_step]
+        key, stype = (step[0], step[3])
+        
+        if stype == 'choice':
+            choices = step[4]
+            self.config[key] = choices[self.choice_index]
+            self.current_step += 1
+            self.choice_index = 0
+        else:
+            value = self.get_input()
+            if value or key != 'title':
+                if stype == 'list':
+                    self.config[key] = [s.strip() for s in value.split(',') if s.strip()] if value else []
+                else:
+                    self.config[key] = value if value else self.config.get(key, '')
+                self.current_step += 1
+            elif not value and key == 'title':
+                h, w = self.scr.getmaxyx()
+                TUI.safe_addstr(self.scr, h - 2, (w - 20) // 2, 'Title is required!', curses.color_pair(6) | curses.A_BOLD)
+                self.scr.refresh()
+                curses.napms(1000)
 
     def refresh(self):
         h_raw, w_raw = self.scr.getmaxyx()
@@ -113,6 +170,7 @@ class InitWizard:
         return value
 
     def run(self):
+        # Initial welcome screen
         while True:
             if not TUI.check_terminal_size(self.scr):
                 return None
@@ -131,44 +189,20 @@ class InitWizard:
                 return None
             if k in (ord('\n'), 10, curses.KEY_ENTER):
                 break
+                
+        # Wizard loop
         while self.current_step < len(self.steps):
             if not TUI.check_terminal_size(self.scr):
                 return None
             self.refresh()
             k = self.scr.getch()
-            step = self.steps[self.current_step]
-            key, stype = (step[0], step[3])
-            if k == 27:
+            
+            # Delegate to KeyHandler
+            handled, res = handle_key_event(k, self.keymap, self)
+            if handled and res == 'EXIT':
                 return None
-            elif k in (curses.KEY_BACKSPACE, 127, 8) and self.current_step > 0:
-                self.current_step -= 1
-                if self.steps[self.current_step][3] == 'choice':
-                    choices = self.steps[self.current_step][4]
-                    curr = self.config.get(self.steps[self.current_step][0], choices[0])
-                    self.choice_index = choices.index(curr) if curr in choices else 0
-            elif stype == 'choice':
-                choices = step[4]
-                if k == curses.KEY_LEFT:
-                    self.choice_index = (self.choice_index - 1) % len(choices)
-                elif k == curses.KEY_RIGHT:
-                    self.choice_index = (self.choice_index + 1) % len(choices)
-                elif k in (ord('\n'), 10, curses.KEY_ENTER):
-                    self.config[key] = choices[self.choice_index]
-                    self.current_step += 1
-                    self.choice_index = 0
-            elif k in (ord('\n'), 10, curses.KEY_ENTER):
-                value = self.get_input()
-                if value or key != 'title':
-                    if stype == 'list':
-                        self.config[key] = [s.strip() for s in value.split(',') if s.strip()] if value else []
-                    else:
-                        self.config[key] = value if value else self.config.get(key, '')
-                    self.current_step += 1
-                elif not value and key == 'title':
-                    h, w = self.scr.getmaxyx()
-                    TUI.safe_addstr(self.scr, h - 2, (w - 20) // 2, 'Title is required!', curses.color_pair(6) | curses.A_BOLD)
-                    self.scr.refresh()
-                    curses.napms(1000)
+                
+        # Save
         try:
             CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
             CONFIG_FILE.write_text(json.dumps(self.config, indent=4))

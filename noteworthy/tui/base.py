@@ -5,6 +5,8 @@ import curses.textpad
 from pathlib import Path
 from ..core.config_mgmt import export_file, import_file, list_exports_for
 from ..config import MIN_TERM_HEIGHT, MIN_TERM_WIDTH
+from ..utils import register_key, handle_key_event
+from .keybinds import SaveBind, ExitBind, NavigationBind, KeyBind
 
 class TUI:
 
@@ -194,7 +196,37 @@ class BaseEditor:
         self.scr = scr
         self.title = title
         self.modified = False
+        self.keymap = {}
         TUI.init_colors()
+        
+        # Register default bindings
+        register_key(self.keymap, ExitBind(self.do_exit))
+        register_key(self.keymap, SaveBind()) # Uses default self.save()
+        
+    def do_exit(self, ctx=None):
+        if self.modified:
+            if not self.save_dialog():
+                return
+        return 'EXIT' # Signal to break loop
+        
+    def save_dialog(self):
+        """Returns True if it's safe to exit (saved, discarded, or not modified)."""
+        if not self.modified: return True
+        
+        # This prompts user, logic was in run loop efficiently inline, but we extract it
+        # Actually, let's keep it simple. If we trigger exit from binding, we need to handle the flow.
+        # The keybind return value is not fully used yet.
+        # Let's adjust implementation to just set a flag or handle logic.
+        
+        # Re-using the logic from old run() loop:
+        # if self.modified: if not self.save(): pass 
+        
+        # Let's try to prompt save.
+        res = TUI.prompt_save(self.scr) # y/n/c
+        if res == 'c': return False
+        if res == 'y':
+            return self.save()
+        return True # n -> exit without saving
 
     def refresh(self):
         raise NotImplementedError
@@ -208,19 +240,27 @@ class BaseEditor:
             if not TUI.check_terminal_size(self.scr):
                 return
             k = self.scr.getch()
-            if k == 27:
-                if self.modified:
-                    if not self.save():
-                        pass
-                return
-            elif k == ord('s') and self.save():
-                TUI.show_saved(self.scr)
-            elif k == ord('x'):
-                self.do_export()
-            elif k == ord('l'):
-                self.do_import()
+            
+            # Delegate to KeyHandler
+            handled, res = handle_key_event(k, self.keymap, self)
+            if handled:
+                if res == 'EXIT':
+                    return
+                # If save return True, show saved
+                if res is True and not isinstance(res, str): 
+                     # Only if it was a save action? 
+                     # We can make SaveBind return 'SAVED' or True.
+                     # But self.save() usually returns boolean.
+                     pass 
             else:
-                self._handle_input(k)
+                 # Fallback for manual handling if needed, though we want to deprecate this
+                if k == ord('x'):
+                    self.do_export()
+                elif k == ord('l'):
+                    self.do_import()
+                else:
+                    self._handle_input(k)
+            
             self.refresh()
 
     def _handle_input(self, k):
@@ -235,6 +275,15 @@ class ListEditor(BaseEditor):
         self.scroll = 0
         self.box_title = 'Items'
         self.box_width = 70
+        
+        # Register Navigation
+        # Register Navigation
+        register_key(self.keymap, NavigationBind('UP', self.cursor_up))
+        register_key(self.keymap, NavigationBind('DOWN', self.cursor_down))
+        register_key(self.keymap, NavigationBind('PGUP', self.cursor_pgup))
+        register_key(self.keymap, NavigationBind('PGDN', self.cursor_pgdn))
+        register_key(self.keymap, NavigationBind('HOME', self.cursor_home))
+        register_key(self.keymap, NavigationBind('END', self.cursor_end))
 
     def _draw_item(self, y, x, item, width, selected):
         raise NotImplementedError
@@ -268,11 +317,26 @@ class ListEditor(BaseEditor):
         footer = 'Esc: Save & Exit'
         TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
-    def _handle_input(self, k):
-        if k in (curses.KEY_UP, ord('k')):
-            self.cursor = max(0, self.cursor - 1)
-        elif k in (curses.KEY_DOWN, ord('j')):
-            self.cursor = min(len(self.items) - 1, self.cursor + 1)
-        else:
-            return False
-        return True
+    def cursor_up(self, ctx):
+        self.cursor = max(0, self.cursor - 1)
+        
+    def cursor_down(self, ctx):
+        self.cursor = min(len(self.items) - 1, self.cursor + 1)
+        
+    def cursor_pgup(self, ctx):
+        h, _ = self.scr.getmaxyx()
+        jump = h - 8 # Approximate page size based on list_h calculation
+        if jump < 1: jump = 1
+        self.cursor = max(0, self.cursor - jump)
+
+    def cursor_pgdn(self, ctx):
+        h, _ = self.scr.getmaxyx()
+        jump = h - 8
+        if jump < 1: jump = 1
+        self.cursor = min(len(self.items) - 1, self.cursor + jump)
+        
+    def cursor_home(self, ctx):
+        self.cursor = 0
+        
+    def cursor_end(self, ctx):
+        self.cursor = len(self.items) - 1

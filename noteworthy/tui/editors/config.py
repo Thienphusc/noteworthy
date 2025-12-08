@@ -3,7 +3,8 @@ import json
 from ..base import ListEditor, TUI
 from ..components.common import LineEditor
 from ...config import CONFIG_FILE, PREFACE_FILE
-from ...utils import load_config_safe, save_config
+from ...utils import load_config_safe, save_config, register_key
+from ..keybinds import ConfirmBind, ToggleBind, KeyBind
 from .schemes import extract_themes
 from .text import TextEditor
 
@@ -15,8 +16,11 @@ class ConfigEditor(ListEditor):
         self.filepath = CONFIG_FILE
         self.themes = extract_themes()
         self._build_items()
-        self.box_title = 'Settings'
-        self.box_width = 80 # Increased width for better margin
+        self.box_title = 'Configuration'
+        self.box_width = 80
+        
+        register_key(self.keymap, ConfirmBind(self.action_edit))
+        register_key(self.keymap, ToggleBind(self.action_toggle))
 
     def _build_items(self):
         # Metadata for known fields to ensure nice display and ordering
@@ -159,57 +163,56 @@ class ConfigEditor(ListEditor):
         footer = 'Enter:Edit Space:Toggle Esc:Save x:Export l:Import'
         TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
-    def _handle_input(self, k):
-        if super()._handle_input(k):
-            return True
-        
+    def action_edit(self, ctx):
         item = self.items[self.cursor]
         key = item[0]
         if len(item) == 4: _, label, ftype, opts = item
         else: _, label, ftype = item
 
-        if k in (ord('\n'), 10):
-            if key == 'Preface':
-                editor = TextEditor(self.scr, filepath=PREFACE_FILE, title='Preface Editor')
-                editor.run()
-            elif ftype == 'choice':
-                val = self.config.get(key, opts[0])
-                try: idx = opts.index(val)
-                except: idx = 0
-                idx = (idx + 1) % len(opts)
-                self.config[key] = opts[idx]
+        if key == 'Preface':
+            editor = TextEditor(self.scr, filepath=PREFACE_FILE, title='Preface Editor')
+            editor.run()
+        elif ftype == 'choice':
+            val = self.config.get(key, opts[0])
+            try: idx = opts.index(val)
+            except: idx = 0
+            idx = (idx + 1) % len(opts)
+            self.config[key] = opts[idx]
+            self.modified = True
+        elif ftype == 'bool':
+            self.config[key] = not self.config.get(key, False)
+            self.modified = True
+        elif ftype == 'list':
+            val = self.config.get(key, [])
+            curr = ', '.join(val)
+            new_val = LineEditor(self.scr, initial_value=curr, title=f'Edit {label}').run()
+            if new_val is not None:
+                self.config[key] = [s.strip() for s in new_val.split(',') if s.strip()]
                 self.modified = True
-            elif ftype == 'bool':
-                self.config[key] = not self.config.get(key, False)
+        else:
+            val = self.config.get(key, "")
+            new_val = LineEditor(self.scr, initial_value=str(val), title=f'Edit {label}').run()
+            if new_val is not None:
+                if ftype == 'int':
+                    try: self.config[key] = int(new_val)
+                    except: pass
+                else:
+                    self.config[key] = new_val
                 self.modified = True
-            elif ftype == 'list':
-                val = self.config.get(key, [])
-                curr = ', '.join(val)
-                new_val = LineEditor(self.scr, initial_value=curr, title=f'Edit {label}').run()
-                if new_val is not None:
-                    self.config[key] = [s.strip() for s in new_val.split(',') if s.strip()]
-                    self.modified = True
-            else:
-                val = self.config.get(key, "")
-                new_val = LineEditor(self.scr, initial_value=str(val), title=f'Edit {label}').run()
-                if new_val is not None:
-                    if ftype == 'int':
-                        try: self.config[key] = int(new_val)
-                        except: pass
-                    else:
-                        self.config[key] = new_val
-                    self.modified = True
-            return True
-        elif k == ord(' '):
-            if ftype == 'bool':
-                self.config[key] = not self.config.get(key, False)
-                self.modified = True
-            elif ftype == 'choice':
-                val = self.config.get(key, opts[0])
-                try: idx = opts.index(val)
-                except: idx = 0
-                idx = (idx + 1) % len(opts)
-                self.config[key] = opts[idx]
-                self.modified = True
-            return True
-        return False
+    
+    def action_toggle(self, ctx):
+        item = self.items[self.cursor]
+        key = item[0]
+        if len(item) == 4: _, label, ftype, opts = item
+        else: _, label, ftype = item
+        
+        if ftype == 'bool':
+            self.config[key] = not self.config.get(key, False)
+            self.modified = True
+        elif ftype == 'choice':
+            val = self.config.get(key, opts[0])
+            try: idx = opts.index(val)
+            except: idx = 0
+            idx = (idx + 1) % len(opts)
+            self.config[key] = opts[idx]
+            self.modified = True

@@ -17,6 +17,16 @@ from .components.common import show_error_screen
 def needs_init():
     return not (CONFIG_FILE.exists() and HIERARCHY_FILE.exists() and SCHEMES_FILE.exists())
 
+def run_build(scr):
+    try:
+        hierarchy = json.loads(HIERARCHY_FILE.read_text())
+        menu = BuildMenu(scr, hierarchy)
+        res = menu.run()
+        if res:
+            run_build_process(scr, hierarchy, res)
+    except Exception as e:
+        show_error_screen(scr, e)
+
 def run_app(scr, args):
     TUI.init_colors()
     if not TUI.check_terminal_size(scr):
@@ -43,16 +53,9 @@ def run_app(scr, args):
     while True:
         menu = MainMenu(scr)
         action = menu.run()
-        if action is None:
+        if action is None or action == 'EXIT':
             break
         elif action == 'editor':
             show_editor_menu(scr)
         elif action == 'builder':
-            try:
-                hierarchy = json.loads(HIERARCHY_FILE.read_text())
-                menu = BuildMenu(scr, hierarchy)
-                res = menu.run()
-                if res:
-                    run_build_process(scr, hierarchy, res)
-            except Exception as e:
-                show_error_screen(scr, e)
+            run_build(scr)

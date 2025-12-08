@@ -1,6 +1,8 @@
 import curses
 from pathlib import Path
 from ..base import BaseEditor, TUI
+from ..keybinds import KeyBind, NavigationBind, ConfirmBind
+from ...utils import register_key, handle_key_event
 
 class TextEditor(BaseEditor):
 
@@ -16,6 +18,33 @@ class TextEditor(BaseEditor):
         self.cy, self.cx = (0, 0)
         self.scroll_y = 0
         self.preferred_x = 0
+        
+        # Register Bindings
+        register_key(self.keymap, NavigationBind('UP', self.move_up))
+        register_key(self.keymap, NavigationBind('DOWN', self.move_down))
+        register_key(self.keymap, NavigationBind('LEFT', self.move_left))
+        register_key(self.keymap, NavigationBind('RIGHT', self.move_right))
+        register_key(self.keymap, NavigationBind('HOME', self.move_home))
+        register_key(self.keymap, NavigationBind('END', self.move_end))
+        register_key(self.keymap, NavigationBind('PGUP', self.move_pgup))
+        register_key(self.keymap, NavigationBind('PGDN', self.move_pgdn))
+        
+        register_key(self.keymap, KeyBind([curses.KEY_BACKSPACE, 127, 8], self.handle_backspace, "Backspace"))
+        register_key(self.keymap, KeyBind([curses.KEY_DC], self.handle_delete, "Delete"))
+        register_key(self.keymap, ConfirmBind(self.handle_enter))
+        register_key(self.keymap, KeyBind(9, self.handle_tab, "Tab"))
+        register_key(self.keymap, KeyBind(24, self.do_export, "Export")) # Ctrl+X
+        register_key(self.keymap, KeyBind(12, self.do_import, "Import")) # Ctrl+L
+        
+        # Override Exit to handle return value behavior
+        # We replace the default ExitBind from BaseEditor
+        register_key(self.keymap, KeyBind(27, self.do_exit_text, "Save & Exit"))
+
+    def do_exit_text(self, ctx=None):
+        curses.curs_set(0)
+        if self.modified:
+             self.save()
+        return 'EXIT_WITH_CONTENT'
 
     def save(self):
         if self.filepath:
@@ -66,7 +95,7 @@ class TextEditor(BaseEditor):
         TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
         curses.curs_set(1)
         cur_y = vcy - self.scroll_y + 2
-        cur_x = 6 + (self.cx - visual_lines[vcy][2])
+        cur_x = 7 + (self.cx - visual_lines[vcy][2])
         if 0 <= cur_y < h - 1 and 0 <= cur_x < w:
             self.scr.move(cur_y, cur_x)
         self.scr.refresh()
@@ -101,105 +130,112 @@ class TextEditor(BaseEditor):
             if not TUI.check_terminal_size(self.scr):
                 return None
             k = self.scr.getch()
-            if k == 27:
-                curses.curs_set(0)
-                if self.modified:
-                    self.save()
-                return '\n'.join(self.lines) if not self.filepath else None
-            else:
-                self._handle_input(k)
+            
+            # Delegate to KeyHandler
+            handled, res = handle_key_event(k, self.keymap, self)
+            if handled:
+                if res == 'EXIT_WITH_CONTENT':
+                    return '\n'.join(self.lines) if not self.filepath else None
+            elif 32 <= k <= 126:
+                self.handle_char(k)
+            
             self.refresh()
 
-    def _handle_input(self, k):
-        if k == 24: # Ctrl+X
-            self.do_export()
-            return True
-        elif k == 12: # Ctrl+L
-            self.do_import()
-            return True
+    def handle_char(self, k):
+        self.lines[self.cy] = self.lines[self.cy][:self.cx] + chr(k) + self.lines[self.cy][self.cx:]
+        self.cx += 1
+        self.modified = True
         
+    def handle_tab(self, ctx):
+        self.lines[self.cy] = self.lines[self.cy][:self.cx] + '    ' + self.lines[self.cy][self.cx:]
+        self.cx += 4
+        self.modified = True
+
+    def handle_enter(self, ctx):
+        self.lines.insert(self.cy + 1, self.lines[self.cy][self.cx:])
+        self.lines[self.cy] = self.lines[self.cy][:self.cx]
+        self.cy += 1
+        self.cx = 0
+        self.modified = True
+
+    def handle_backspace(self, ctx):
+        if self.cx > 0:
+            self.lines[self.cy] = self.lines[self.cy][:self.cx - 1] + self.lines[self.cy][self.cx:]
+            self.cx -= 1
+            self.modified = True
+        elif self.cy > 0:
+            pl = len(self.lines[self.cy - 1])
+            self.lines[self.cy - 1] += self.lines[self.cy]
+            del self.lines[self.cy]
+            self.cy -= 1
+            self.cx = pl
+            self.modified = True
+
+    def handle_delete(self, ctx):
+        if self.cx < len(self.lines[self.cy]):
+            self.lines[self.cy] = self.lines[self.cy][:self.cx] + self.lines[self.cy][self.cx + 1:]
+            self.modified = True
+        elif self.cy < len(self.lines) - 1:
+            self.lines[self.cy] += self.lines[self.cy + 1]
+            del self.lines[self.cy + 1]
+            self.modified = True
+
+    def _get_visual_info(self):
         visual_lines = self._get_visual_lines(self.scr.getmaxyx()[1] - 5)
-        if k == curses.KEY_UP:
-            vcy = 0
-            for i, (text, l_idx, start_idx) in enumerate(visual_lines):
-                if l_idx == self.cy:
-                    is_last_chunk = True
-                    if i + 1 < len(visual_lines) and visual_lines[i + 1][1] == l_idx:
-                        is_last_chunk = False
-                    if self.cx >= start_idx and (self.cx < start_idx + len(text) or (self.cx == start_idx + len(text) and is_last_chunk)):
-                        vcy = i
-                        break
-            if vcy > 0:
-                target_vcy = vcy - 1
-                t_text, t_lidx, t_start = visual_lines[target_vcy]
-                curr_vx = self.cx - visual_lines[vcy][2]
-                self.cy = t_lidx
-                self.cx = t_start + min(curr_vx, len(t_text))
-        elif k == curses.KEY_DOWN:
-            vcy = 0
-            for i, (text, l_idx, start_idx) in enumerate(visual_lines):
-                if l_idx == self.cy:
-                    is_last_chunk = True
-                    if i + 1 < len(visual_lines) and visual_lines[i + 1][1] == l_idx:
-                        is_last_chunk = False
-                    if self.cx >= start_idx and (self.cx < start_idx + len(text) or (self.cx == start_idx + len(text) and is_last_chunk)):
-                        vcy = i
-                        break
-            if vcy < len(visual_lines) - 1:
-                target_vcy = vcy + 1
-                t_text, t_lidx, t_start = visual_lines[target_vcy]
-                curr_vx = self.cx - visual_lines[vcy][2]
-                self.cy = t_lidx
-                self.cx = t_start + min(curr_vx, len(t_text))
-        elif k == curses.KEY_LEFT:
-            if self.cx > 0:
-                self.cx -= 1
-            elif self.cy > 0:
-                self.cy -= 1
-                self.cx = len(self.lines[self.cy])
-        elif k == curses.KEY_RIGHT:
-            if self.cx < len(self.lines[self.cy]):
-                self.cx += 1
-            elif self.cy < len(self.lines) - 1:
-                self.cy += 1
-                self.cx = 0
-        elif k == curses.KEY_HOME:
-            self.cx = 0
-        elif k == curses.KEY_END:
+        # Find current visual cursor y (vcy)
+        vcy = 0
+        for i, (text, l_idx, start_idx) in enumerate(visual_lines):
+            if l_idx == self.cy:
+                is_last_chunk = True
+                if i + 1 < len(visual_lines) and visual_lines[i + 1][1] == l_idx:
+                    is_last_chunk = False
+                if self.cx >= start_idx and (self.cx < start_idx + len(text) or (self.cx == start_idx + len(text) and is_last_chunk)):
+                    vcy = i
+                    break
+        return visual_lines, vcy
+
+    def move_up(self, ctx):
+        visual_lines, vcy = self._get_visual_info()
+        if vcy > 0:
+            target_vcy = vcy - 1
+            t_text, t_lidx, t_start = visual_lines[target_vcy]
+            curr_vx = self.cx - visual_lines[vcy][2]
+            self.cy = t_lidx
+            self.cx = t_start + min(curr_vx, len(t_text))
+
+    def move_down(self, ctx):
+        visual_lines, vcy = self._get_visual_info()
+        if vcy < len(visual_lines) - 1:
+            target_vcy = vcy + 1
+            t_text, t_lidx, t_start = visual_lines[target_vcy]
+            curr_vx = self.cx - visual_lines[vcy][2]
+            self.cy = t_lidx
+            self.cx = t_start + min(curr_vx, len(t_text))
+            
+    def move_pgup(self, ctx):
+        h, _ = self.scr.getmaxyx()
+        for _ in range(h - 4): self.move_up(ctx)
+        
+    def move_pgdn(self, ctx):
+        h, _ = self.scr.getmaxyx()
+        for _ in range(h - 4): self.move_down(ctx)
+
+    def move_left(self, ctx):
+        if self.cx > 0:
+            self.cx -= 1
+        elif self.cy > 0:
+            self.cy -= 1
             self.cx = len(self.lines[self.cy])
-        elif k in (curses.KEY_BACKSPACE, 127, 8):
-            if self.cx > 0:
-                self.lines[self.cy] = self.lines[self.cy][:self.cx - 1] + self.lines[self.cy][self.cx:]
-                self.cx -= 1
-                self.modified = True
-            elif self.cy > 0:
-                pl = len(self.lines[self.cy - 1])
-                self.lines[self.cy - 1] += self.lines[self.cy]
-                del self.lines[self.cy]
-                self.cy -= 1
-                self.cx = pl
-                self.modified = True
-        elif k == curses.KEY_DC:
-            if self.cx < len(self.lines[self.cy]):
-                self.lines[self.cy] = self.lines[self.cy][:self.cx] + self.lines[self.cy][self.cx + 1:]
-                self.modified = True
-            elif self.cy < len(self.lines) - 1:
-                self.lines[self.cy] += self.lines[self.cy + 1]
-                del self.lines[self.cy + 1]
-                self.modified = True
-        elif k in (ord('\n'), 10):
-            self.lines.insert(self.cy + 1, self.lines[self.cy][self.cx:])
-            self.lines[self.cy] = self.lines[self.cy][:self.cx]
+
+    def move_right(self, ctx):
+        if self.cx < len(self.lines[self.cy]):
+            self.cx += 1
+        elif self.cy < len(self.lines) - 1:
             self.cy += 1
             self.cx = 0
-            self.modified = True
-        elif k == 9:
-            self.lines[self.cy] = self.lines[self.cy][:self.cx] + '    ' + self.lines[self.cy][self.cx:]
-            self.cx += 4
-            self.modified = True
-        elif 32 <= k <= 126:
-            self.lines[self.cy] = self.lines[self.cy][:self.cx] + chr(k) + self.lines[self.cy][self.cx:]
-            self.cx += 1
-            self.modified = True
-        curses.curs_set(0)
-        return True
+
+    def move_home(self, ctx):
+        self.cx = 0
+
+    def move_end(self, ctx):
+        self.cx = len(self.lines[self.cy])

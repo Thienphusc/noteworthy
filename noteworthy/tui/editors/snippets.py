@@ -2,6 +2,8 @@ import curses
 from ..base import ListEditor, TUI
 from ..components.common import LineEditor
 from ...config import SNIPPETS_FILE
+from ..keybinds import ConfirmBind, KeyBind
+from ...utils import register_key
 
 class SnippetsEditor(ListEditor):
     def __init__(self, scr):
@@ -10,6 +12,46 @@ class SnippetsEditor(ListEditor):
         self._load_snippets()
         self.box_title = "Snippets"
         self.box_width = 80
+        
+        register_key(self.keymap, ConfirmBind(self.action_select))
+        register_key(self.keymap, KeyBind(ord('n'), self.action_new, "New Snippet"))
+        register_key(self.keymap, KeyBind(ord('d'), self.action_delete, "Delete Snippet"))
+    
+    def action_select(self, ctx):
+        if self.cursor >= len(self.snippets):
+            self.action_new(ctx)
+        else:
+            # Edit existing
+            name, definition = self.snippets[self.cursor]
+            new_name = LineEditor(self.scr, initial_value=name, title="Edit Snippet Name").run()
+            if new_name is not None:
+                self.snippets[self.cursor][0] = new_name
+                self.modified = True
+            new_def = LineEditor(self.scr, initial_value=definition, title="Edit Definition").run()
+            if new_def is not None:
+                self.snippets[self.cursor][1] = new_def
+                self.modified = True
+                
+    def action_new(self, ctx):
+        self.snippets.append(["new_snippet", "[definition]"])
+        self.cursor = len(self.snippets) - 1
+        self.modified = True
+        self._update_items()
+        
+        # Edit immediately
+        name, definition = self.snippets[self.cursor]
+        new_name = LineEditor(self.scr, initial_value=name, title="New Snippet Name").run()
+        if new_name is not None: self.snippets[self.cursor][0] = new_name
+        new_def = LineEditor(self.scr, initial_value=definition, title="New Definition").run()
+        if new_def is not None: self.snippets[self.cursor][1] = new_def
+        
+    def action_delete(self, ctx):
+         if self.cursor < len(self.snippets) and self.snippets:
+            if TUI.prompt_confirm(self.scr, "Delete snippet? (y/n): "):
+                del self.snippets[self.cursor]
+            if self.cursor >= len(self.snippets): self.cursor = max(0, len(self.snippets) - 1)
+            self.modified = True
+            self._update_items()
     
     def _load_snippets(self):
         self.snippets = []
@@ -100,46 +142,4 @@ class SnippetsEditor(ListEditor):
         footer = "n: New  d: Delete  Enter: Edit  Esc: Save & Exit  x: Export  l: Import"
         TUI.safe_addstr(self.scr, h - 3, (w - len(footer)) // 2, footer, curses.color_pair(4) | curses.A_DIM)
 
-    def _handle_input(self, k):
-        if super()._handle_input(k): return True
-        
-        if k in (ord('\n'), 10):
-            if self.cursor >= len(self.snippets):
-                # Add new
-                self.snippets.append(["new_snippet", "[definition]"])
-                self.cursor = len(self.snippets) - 1
-                self.modified = True
-                self._update_items()
-                # Edit immediately
-                name, definition = self.snippets[self.cursor]
-                new_name = LineEditor(self.scr, initial_value=name, title="New Snippet Name").run()
-                if new_name is not None: self.snippets[self.cursor][0] = new_name
-                new_def = LineEditor(self.scr, initial_value=definition, title="New Definition").run()
-                if new_def is not None: self.snippets[self.cursor][1] = new_def
-            else:
-                # Edit existing
-                name, definition = self.snippets[self.cursor]
-                new_name = LineEditor(self.scr, initial_value=name, title="Edit Snippet Name").run()
-                if new_name is not None:
-                    self.snippets[self.cursor][0] = new_name
-                    self.modified = True
-                new_def = LineEditor(self.scr, initial_value=definition, title="Edit Definition").run()
-                if new_def is not None:
-                    self.snippets[self.cursor][1] = new_def
-                    self.modified = True
-            return True
-        elif k == ord('n'):
-            self.snippets.append(["new_snippet", "[definition]"])
-            self.cursor = len(self.snippets) - 1
-            self.modified = True
-            self._update_items()
-            return True
-        elif k == ord('d') and self.cursor < len(self.snippets) and self.snippets:
-            if TUI.prompt_confirm(self.scr, "Delete snippet? (y/n): "):
-                del self.snippets[self.cursor]
-            if self.cursor >= len(self.snippets): self.cursor = max(0, len(self.snippets) - 1)
-            self.modified = True
-            self._update_items()
-            return True
-        
-        return False
+    # Removed _handle_input
