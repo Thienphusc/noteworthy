@@ -110,11 +110,11 @@ The noteworthy system guides you through the initialization, the configuration, 
   - `c` - Configure custom Typst flags (e.g., `--font-path`)
   - `e` - Open configuration editors
 - **Editor Menu** (`e` key):
-  - Config Editor - Document settings (title, authors, theme, etc.)
+  - Config Editor - Document settings (title, authors, theme, preface content, etc.)
   - Hierarchy Editor - Chapter/page structure with add/delete
   - Scheme Editor - Color themes with create/delete
   - Snippets Editor - Custom macros
-  - Preface Editor - Preface content
+  - Ignored Files - Manage files excluded from indexing
 - **Controls**: Arrow keys to navigate, Space to toggle, Enter to build, `q` to quit
 - **Build Progress**: Real-time compilation status with Typst log toggle (`v`)
 - **Template Integrity Check**: Verify that the template files are not corrupted and auto fix
@@ -137,6 +137,11 @@ The noteworthy system guides you through the initialization, the configuration, 
 <p align="center">
   <img src="images/config.png" width="45%" />
   <img src="images/snippets.png" width="45%" />
+</p>
+
+<p align="center">
+  <img src="images/indexignore.png" width="45%" />
+  <img src="images/preface.png" width="45%" />
 </p>
 
 <p align="center">
