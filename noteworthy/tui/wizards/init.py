@@ -158,8 +158,7 @@ class InitWizard:
         try:
             real_y = y + 1
             real_x = x + 1
-            self.scr.move(real_y, real_x)
-            self.scr.clrtoeol()
+            TUI.safe_addstr(self.scr, y, x, ' ' * self.input_w)
             TUI.safe_addstr(self.scr, y, x, '> ', curses.color_pair(3) | curses.A_BOLD)
             self.scr.refresh()
             value = self.scr.getstr(real_y, real_x + 2, self.input_w - 6).decode('utf-8').strip()
