@@ -78,18 +78,64 @@ if __name__ == "__main__":
     if do_install:
         if force:
             print("Force updating: Removing existing directories...")
+            
+            # Backup config files
+            backups = []
+            files_to_save = ['config.json', 'hierarchy.json', 'preface.typ']
+            for fname in files_to_save:
+                src = Path(f'templates/config/{fname}')
+                if src.exists():
+                    dst = Path(f'{fname}.bak')
+                    try:
+                        shutil.copy2(src, dst)
+                        backups.append((dst, src))
+                        print(f"Backed up {fname}")
+                    except Exception as e:
+                        print(f"Warning: Failed to backup {fname}: {e}")
+
             if Path('noteworthy').exists():
                 shutil.rmtree('noteworthy')
             if Path('templates').exists():
                 shutil.rmtree('templates')
                 
         print(f"Updating/Installing Noteworthy from branch: {branch}")
-        if not bootstrap(branch):
+        
+        success = bootstrap(branch)
+        
+        # Restore backups regardless of success (to save user data)
+        # If bootstrap successful, it overwrites defaults. If failed, it restores what it can.
+        if force and backups:
+            print("Restoring configuration files...")
+            for dst, src in backups:
+                try:
+                    if dst.exists():
+                        src.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(dst), str(src))
+                        print(f"Restored {src.name}")
+                except Exception as e:
+                    print(f"Error restoring {src.name} (backup at {dst}): {e}")
+
+        if not success:
             print("Update failed or incomplete.")
             if not Path('noteworthy').exists():
                 sys.exit(1)
         else:
             print("Update complete.")
+            
+        # Avoid running main if we just updated and main is potentially old/new mix? 
+        # Actually standard flow falls through. But we modified logic flow slightly.
+        # Original code had if not bootstrap: ... else: print.
+        # I refactored to check success variable.
+
+
+    # Ensure preface.typ exists to prevent build errors
+    preface_path = Path('templates/config/preface.typ')
+    if Path('templates/config').exists() and not preface_path.exists():
+        try:
+            preface_path.write_text('= Preface\n\nEnter your preface content here.')
+            print("Created default preface.typ")
+        except Exception as e:
+            print(f"Warning: Could not create default preface: {e}")
 
     try:
         from noteworthy.__main__ import main
