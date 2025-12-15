@@ -84,6 +84,7 @@ mkdir project
 cd project
 mkdir content
 curl -O https://raw.githubusercontent.com/sihooleebd/noteworthy/master/noteworthy.py
+python3 noteworthy.py
 ```
 
 ### Quickstart
@@ -93,6 +94,17 @@ Add the neccesary content for your project and run the build script. The setup w
 ```bash
 python3 noteworthy.py
 ```
+
+### Advanced Usage
+
+You can force an update or switch branches using CLI flags:
+
+| Flag | Description |
+|------|-------------|
+| `--load` | Force update/install from `master` branch. |
+| `--load-nightly` | Force update/install from `nightly` branch. |
+| `--force-update` | **Destructive**. Removes existing `noteworthy` and `templates` folders and reinstalls from `master`. |
+| `--force-update-nightly` | **Destructive**. Removes existing `noteworthy` and `templates` folders and reinstalls from `nightly`. |
 
 The noteworthy system guides you through the initialization, the configuration, and the build. Upon first run, the template will load the necessary template files. 
 
@@ -109,14 +121,15 @@ The noteworthy system guides you through the initialization, the configuration, 
   - `c` - Configure custom Typst flags (e.g., `--font-path`)
   - `e` - Open configuration editors
 - **Editor Menu** (`e` key):
-  - Config Editor - Document settings (title, authors, theme, etc.)
+  - Config Editor - Document settings (title, authors, theme, preface content, etc.)
   - Hierarchy Editor - Chapter/page structure with add/delete
   - Scheme Editor - Color themes with create/delete
   - Snippets Editor - Custom macros
-  - Preface Editor - Preface content
+  - Ignored Files - Manage files excluded from indexing
 - **Controls**: Arrow keys to navigate, Space to toggle, Enter to build, `q` to quit
 - **Build Progress**: Real-time compilation status with Typst log toggle (`v`)
 - **Template Integrity Check**: Verify that the template files are not corrupted and auto fix
+- **Backup & Restore**: Export and Import configuration files individually
 
 #### Interface Preview
 
@@ -135,6 +148,11 @@ The noteworthy system guides you through the initialization, the configuration, 
 <p align="center">
   <img src="images/config.png" width="45%" />
   <img src="images/snippets.png" width="45%" />
+</p>
+
+<p align="center">
+  <img src="images/indexignore.png" width="45%" />
+  <img src="images/preface.png" width="45%" />
 </p>
 
 <p align="center">
