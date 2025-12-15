@@ -3,7 +3,7 @@ import subprocess
 from ...config import SAD_FACE, HAPPY_FACE, HMM_FACE, OUTPUT_FILE
 from ...utils import register_key, handle_key_event
 from ..base import TUI
-from ..keybinds import KeyBind, ConfirmBind
+from ..keybinds import KeyBind, ConfirmBind, NavigationBind
 
 class LineEditor:
 
@@ -11,11 +11,15 @@ class LineEditor:
         self.scr = scr
         self.title = title
         self.value = initial_value
+        self.cursor_pos = len(initial_value) # Cursor position index
         
         self.keymap = {}
         register_key(self.keymap, KeyBind(27, self.action_cancel, "Cancel"))
         register_key(self.keymap, ConfirmBind(self.action_confirm))
         register_key(self.keymap, KeyBind([curses.KEY_BACKSPACE, 127, 8], self.action_backspace, "Backspace"))
+        register_key(self.keymap, NavigationBind('LEFT', self.action_left))
+        register_key(self.keymap, NavigationBind('RIGHT', self.action_right))
+        register_key(self.keymap, KeyBind([curses.KEY_DC, 330], self.action_delete, "Delete"))
 
     def action_cancel(self, ctx):
         return 'EXIT_CANCEL'
@@ -24,10 +28,23 @@ class LineEditor:
         return 'EXIT_CONFIRM'
 
     def action_backspace(self, ctx):
-        self.value = self.value[:-1]
+        if self.cursor_pos > 0:
+            self.value = self.value[:self.cursor_pos - 1] + self.value[self.cursor_pos:]
+            self.cursor_pos -= 1
+            
+    def action_delete(self, ctx):
+        if self.cursor_pos < len(self.value):
+            self.value = self.value[:self.cursor_pos] + self.value[self.cursor_pos + 1:]
+
+    def action_left(self, ctx):
+        self.cursor_pos = max(0, self.cursor_pos - 1)
+        
+    def action_right(self, ctx):
+        self.cursor_pos = min(len(self.value), self.cursor_pos + 1)
 
     def handle_char(self, char):
-        self.value += char
+        self.value = self.value[:self.cursor_pos] + char + self.value[self.cursor_pos:]
+        self.cursor_pos += 1
         return True
 
     def run(self):
@@ -44,6 +61,9 @@ class LineEditor:
         
         curses.curs_set(1)
         
+        # Scroll offset for long text
+        scroll_off = 0
+        
         while True:
             if not TUI.check_terminal_size(self.scr):
                 return None
@@ -53,14 +73,31 @@ class LineEditor:
             input_y = box_y + 2
             input_x = box_x + 2
             max_len = box_w - 4
-            disp_val = self.value
-            if len(disp_val) >= max_len:
-                disp_val = disp_val[-(max_len - 1):]
+            
+            # Ensure cursor remains visible
+            if self.cursor_pos < scroll_off:
+                scroll_off = self.cursor_pos
+            if self.cursor_pos >= scroll_off + max_len:
+                scroll_off = self.cursor_pos - max_len + 1
+            
+            disp_val = self.value[scroll_off:scroll_off + max_len]
+            
+            # If text is longer than visible area but doesn't fill it from start
+            # (standard slice handled above)
+            
             TUI.safe_addstr(self.scr, input_y, input_x, ' ' * max_len, curses.color_pair(4))
             TUI.safe_addstr(self.scr, input_y, input_x, disp_val, curses.color_pair(1) | curses.A_BOLD)
+            
+            real_cur_x = input_x + 1 + (self.cursor_pos - scroll_off)
+            
+            # Clamp cursor visual (should be correct by logic above)
+            real_cur_x = min(real_cur_x, input_x + 1 + max_len) 
+            
             real_y = input_y + 1
-            real_x = input_x + 1 + len(disp_val)
-            self.scr.move(real_y, real_x)
+            try:
+                self.scr.move(real_y, real_cur_x)
+            except:
+                pass
             
             k = self.scr.getch()
             handled, res = handle_key_event(k, self.keymap, self)

@@ -92,27 +92,17 @@ class SyncWizard:
             return False
 
     def adopt_hierarchy(self):
+        from ...core.fs_sync import ensure_content_structure
         try:
-            for missing in self.missing_files:
-                path = Path(missing)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                if not path.exists():
-                    path.write_text(f'#import "../../templates/templater.typ": *\n\nWrite your content here.')
+            ensure_content_structure(self.hierarchy)
             return True
         except:
             return False
 
     def delete_extra(self):
+        from ...core.fs_sync import cleanup_extra_files
         try:
-            for f in self.new_files:
-                path = Path(f)
-                if path.exists():
-                    path.unlink()
-                try:
-                    if path.parent.exists() and (not any(path.parent.iterdir())):
-                        path.parent.rmdir()
-                except:
-                    pass
+            cleanup_extra_files(self.hierarchy)
             return True
         except:
             return False
