@@ -74,7 +74,12 @@ class ConfigEditor(ListEditor):
         self.items.insert(0, ('Preface', 'Edit Preface Content...', 'action'))
 
     def save(self):
-        return save_config(self.config)
+        try:
+            save_config(self.config)
+            return True
+        except Exception as e:
+            # In a real app we might show a popup, but for now we log/ignore
+            return False
 
     def _draw_item(self, y, x, item, width, selected):
         key = item[0]
@@ -185,14 +190,29 @@ class ConfigEditor(ListEditor):
                 self.config[key] = [s.strip() for s in new_val.split(',') if s.strip()]
                 self.modified = True
         else:
-            val = self.config.get(key, "")
-            new_val = LineEditor(self.scr, initial_value=str(val), title=f'Edit {label}').run()
+        else:
+            val = self.config.get(key)
+            # If value is explicitly None, show empty string. 
+            # If it's missing (shouldn't be for known fields), default to empty.
+            init_val = str(val) if val is not None else ""
+            
+            new_val = LineEditor(self.scr, initial_value=init_val, title=f'Edit {label}').run()
+            
             if new_val is not None:
                 if ftype == 'int':
-                    try: self.config[key] = int(new_val)
-                    except: pass
+                    try: 
+                        if not new_val: self.config[key] = None
+                        else: self.config[key] = int(new_val)
+                    except ValueError:
+                         # Error handling: revert or ignore? User asked for error handling on save, 
+                         # but validating here is better. We'll just ignore invalid int for now or set None?
+                         # Better to not update if invalid.
+                         pass
                 else:
-                    self.config[key] = new_val
+                    if not new_val:
+                        self.config[key] = None
+                    else:
+                        self.config[key] = new_val
                 self.modified = True
     
     def action_toggle(self, ctx):
