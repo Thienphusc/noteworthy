@@ -83,8 +83,8 @@ An example project is available at https://github.com/sihooleebd/math-noteworthy
 mkdir project
 cd project
 mkdir content
-curl -O https://raw.githubusercontent.com/sihooleebd/noteworthy/master/load-noteworthy.py
-python3 load-noteworthy.py
+curl -O https://raw.githubusercontent.com/sihooleebd/noteworthy/master/noteworthy.py
+python3 noteworthy.py
 ```
 
 ### Quickstart
@@ -94,6 +94,17 @@ Add the neccesary content for your project and run the build script. The setup w
 ```bash
 python3 noteworthy.py
 ```
+
+### Advanced Usage
+
+You can force an update or switch branches using CLI flags:
+
+| Flag | Description |
+|------|-------------|
+| `--load` | Force update/install from `master` branch. |
+| `--load-nightly` | Force update/install from `nightly` branch. |
+| `--force-update` | **Destructive**. Removes existing `noteworthy` and `templates` folders and reinstalls from `master`. |
+| `--force-update-nightly` | **Destructive**. Removes existing `noteworthy` and `templates` folders and reinstalls from `nightly`. |
 
 The noteworthy system guides you through the initialization, the configuration, and the build. Upon first run, the template will load the necessary template files. 
 
