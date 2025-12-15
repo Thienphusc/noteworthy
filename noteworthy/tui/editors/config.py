@@ -190,7 +190,6 @@ class ConfigEditor(ListEditor):
                 self.config[key] = [s.strip() for s in new_val.split(',') if s.strip()]
                 self.modified = True
         else:
-        else:
             val = self.config.get(key)
             # If value is explicitly None, show empty string. 
             # If it's missing (shouldn't be for known fields), default to empty.
