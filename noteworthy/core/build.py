@@ -6,7 +6,7 @@ import time
 import json
 import logging
 from pathlib import Path
-from ..config import BASE_DIR, BUILD_DIR, RENDERER_FILE
+from ..config import BASE_DIR, BUILD_DIR, RENDERER_FILE, PREFACE_FILE
 
 def get_pdf_page_count(pdf_path):
     try:
@@ -17,6 +17,11 @@ def get_pdf_page_count(pdf_path):
     except:
         pass
     return 0
+
+class TypstBuildError(Exception):
+    def __init__(self, message, stderr):
+        super().__init__(f"{message}\n\n[Typst Output]:\n{stderr}")
+        self.stderr = stderr
 
 def compile_target(target, output, page_offset=None, page_map=None, extra_flags=None, callback=None, log_callback=None):
     cmd = ['typst', 'compile', str(RENDERER_FILE), str(output), '--root', str(BASE_DIR), '--input', f'target={target}']
@@ -82,7 +87,7 @@ def compile_target(target, output, page_offset=None, page_map=None, extra_flags=
     if proc.returncode != 0:
         logging.error(f'Typst compilation failed for {target}. Return code: {proc.returncode}')
         logging.error(f"Output: {''.join(all_output)}")
-        raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=''.join(all_output))
+        raise TypstBuildError(f"Typst compilation failed for {target} (Exit: {proc.returncode})", ''.join(all_output))
     if log_callback:
         log_callback(f'[done] {target}\n')
     return ''.join(all_output)
@@ -221,7 +226,11 @@ class BuildManager:
         if opts['frontmatter']:
             if config.get('display-cover', True):
                 tasks.append(('cover', 'front', 'cover', self.build_dir / '00_cover.pdf', 'Cover'))
-            tasks.append(('preface', 'front', 'preface', self.build_dir / '01_preface.pdf', 'Preface'))
+            try:
+                if PREFACE_FILE.exists() and PREFACE_FILE.read_text().strip():
+                    tasks.append(('preface', 'front', 'preface', self.build_dir / '01_preface.pdf', 'Preface'))
+            except:
+                pass
             if config.get('display-outline', True):
                 tasks.append(('outline', 'front', 'outline', self.build_dir / '02_outline.pdf', 'TOC'))
                 
