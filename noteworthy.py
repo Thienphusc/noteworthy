@@ -28,6 +28,11 @@ def bootstrap(branch='master'):
             continue
         p = item['path']
         if p.startswith('noteworthy/') or p.startswith('templates/') or p == 'noteworthy.py':
+            # Changes for the user request: "JUST BRING THE SCHEMES"
+            # We want to skip the default config/hierarchy/preface so we don't load the "tutor" content.
+            # But we must ensure schemes.json is still downloaded.
+            if p.startswith('templates/config/') and not p.endswith('schemes.json'):
+                continue
             files.append(p)
 
     print(f'Downloading {len(files)} files...')
@@ -128,12 +133,12 @@ if __name__ == "__main__":
         # I refactored to check success variable.
 
 
-    # Ensure preface.typ exists to prevent build errors
+    # Ensure preface.typ exists to prevent build errors, but keep it empty
     preface_path = Path('templates/config/preface.typ')
     if Path('templates/config').exists() and not preface_path.exists():
         try:
-            preface_path.write_text('= Preface\n\nEnter your preface content here.')
-            print("Created default preface.typ")
+            preface_path.write_text('')
+            print("Created empty preface.typ")
         except Exception as e:
             print(f"Warning: Could not create default preface: {e}")
 

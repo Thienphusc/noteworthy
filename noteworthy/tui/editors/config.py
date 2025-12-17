@@ -21,6 +21,8 @@ class ConfigEditor(ListEditor):
         
         register_key(self.keymap, ConfirmBind(self.action_edit))
         register_key(self.keymap, ToggleBind(self.action_toggle))
+        register_key(self.keymap, KeyBind(curses.KEY_RIGHT, self.action_next_value))
+        register_key(self.keymap, KeyBind(curses.KEY_LEFT, self.action_prev_value))
 
     def _build_items(self):
         field_meta = {
@@ -42,7 +44,7 @@ class ConfigEditor(ListEditor):
             "render-implicit-count": ("Implicit Samples", "int"),
             "pad-chapter-id": ("Pad Chapter ID", "bool"),
             "pad-page-id": ("Pad Page ID", "bool"),
-            "heading-numbering": ("Heading Numbering", "str")
+            "heading-numbering": ("Heading Numbering", "choice", ["1.1", "1.", "I.1", "A.1"])
         }
 
         self.fields = []
@@ -107,11 +109,13 @@ class ConfigEditor(ListEditor):
 
         if ftype == 'bool':
             val_str = 'Yes' if val else 'No'
-            color = curses.color_pair(2 if val else 6) | curses.A_BOLD
+            color = curses.color_pair(2 if val else 6)
+            if selected: color = color | curses.A_BOLD
         elif ftype == 'list':
             val_str = ', '.join(val) if isinstance(val, list) else str(val)
         elif ftype == 'choice':
-             color = curses.color_pair(5) | curses.A_BOLD
+             if selected: color = curses.color_pair(5) | curses.A_BOLD
+             else: color = curses.color_pair(4)
         
         TUI.safe_addstr(self.scr, y, x + left_w + 2, val_str[:width - left_w - 4], color)
 
@@ -217,5 +221,33 @@ class ConfigEditor(ListEditor):
             try: idx = opts.index(val)
             except: idx = 0
             idx = (idx + 1) % len(opts)
+            self.config[key] = opts[idx]
+            self.modified = True
+
+    def action_next_value(self, ctx):
+        item = self.items[self.cursor]
+        key = item[0]
+        if len(item) == 4: _, label, ftype, opts = item
+        else: _, label, ftype = item
+
+        if ftype == 'choice':
+            val = self.config.get(key, opts[0])
+            try: idx = opts.index(val)
+            except: idx = 0
+            idx = (idx + 1) % len(opts)
+            self.config[key] = opts[idx]
+            self.modified = True
+    
+    def action_prev_value(self, ctx):
+        item = self.items[self.cursor]
+        key = item[0]
+        if len(item) == 4: _, label, ftype, opts = item
+        else: _, label, ftype = item
+
+        if ftype == 'choice':
+            val = self.config.get(key, opts[0])
+            try: idx = opts.index(val)
+            except: idx = 0
+            idx = (idx - 1 + len(opts)) % len(opts)
             self.config[key] = opts[idx]
             self.modified = True

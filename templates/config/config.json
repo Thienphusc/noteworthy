@@ -24,5 +24,5 @@
     "display-mode": "rose-pine",
     "pad-chapter-id": true,
     "pad-page-id": true,
-    "heading-numbering": null
+    "heading-numbering": "1.1"
 }
